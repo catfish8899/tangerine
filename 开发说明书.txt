@@ -1,0 +1,91 @@
+tangerine 桌面 AI 助手 - 阶段性开发说明书
+本项目是一款基于 Windows 11 Fluent Design（暗黑微光风格）的 AI 智能聊天客户端，整体视觉设计参考 Chatbox。应用后端使用 Rust (Tauri 2.0) 管理窗口及生命周期，并通过本地 Python Sidecar 服务桥接调用官方 DeepSeek API，确保 API 密钥的安全性和本地扩展能力。
+
+--------------------------------------------------------------------------------------------------------------------------------
+
+一、 技术栈组成
+宿主与壳层 (Desktop Shell)
+
+Tauri 2.0：轻量级桌面开发框架。使用 Rust 构建，负责管理应用窗口、文件系统访问，以及在后台自动拉起和管理 Python Sidecar 子进程。
+前端界面 (Frontend UI)
+
+React 18 & TypeScript：用于高效率的前端组件开发与强类型保证。
+Vite 6：极其快速的现代化前端构建与热重载工具。
+Tailwind CSS v4 (@tailwindcss/postcss)：用于像素级还原暗黑精美 UI，无需编写繁琐的 CSS。
+Lucide React：现代、简洁、一致的图标库。
+后端微服务 (Python Sidecar)
+
+Python 3：用于对接 AI 推理及复杂的 Agent 逻辑。
+FastAPI & Uvicorn：在本地 127.0.0.1:5678 启动超轻量级的 HTTP 接口，供前端 React 进行调用。
+OpenAI SDK：官方 DeepSeek API 的承载调用库。
+
+--------------------------------------------------------------------------------------------------------------------------------
+
+二、 项目文件夹结构
+以下是本项目目前已构建的核心文件夹结构，重点标注了我们修改/新建的关键文件及其作用：
+
+tangerine/
+├── .github/                       # (可选) GitHub Action 持续集成配置
+├── node_modules/                  # 前端依赖缓存目录
+├── src/                           # 前端 React 源代码
+│   ├── assets/                    # 静态资源（Logo 等）
+│   ├── App.tsx                    # [已修改] 主界面组件：包含侧边栏、对话历史、右键菜单、LocalStorage 持久化、模型切换、消息发送等核心业务
+│   ├── index.css                  # [新建] Tailwind 指令引入，及 Windows 11 滚动条、Body 全局样式优化
+│   ├── main.tsx                   # [已修改] 前端入口文件：引入 React、App 组件并确保加载 index.css 样式文件
+│   └── vite-env.d.ts              # Vite 环境变量类型定义
+├── src-tauri/                     # Rust 宿主后端源代码
+│   ├── py_sidecar/                # [新建] Python Sidecar 服务目录
+│   │   ├── main.py                # [新建] 本地 FastAPI 服务：读取系统 DEEPSEEK_API_KEY，支持 deepseek-v4-flash/pro 的调用
+│   │   └── requirements.txt       # [新建] Python 依赖声明
+│   ├── src/
+│   │   ├── lib.rs                 # [已修改] Tauri 启动入口：包含智能路径识别，在后台伴随 Tauri 自动拉起/管理 Python 子进程
+│   │   └── main.rs                # Rust 程序编译入口
+│   ├── Cargo.toml                 # Rust 依赖与项目配置文件
+│   └── tauri.conf.json            # Tauri 核心配置文件（窗口大小、权限、插件等）
+├── index.html                     # 网页挂载模版
+├── package.json                   # 前端 Node.js 项目配置文件
+├── pnpm-lock.yaml                 # pnpm 锁定依赖版本文件
+├── postcss.config.js              # [新建] PostCSS 配置文件，激活 @tailwindcss/postcss
+├── tailwind.config.js             # [新建] Tailwind CSS 模版路径扫描配置
+└── README.md                      # 项目说明文档
+
+--------------------------------------------------------------------------------------------------------------------------------
+
+三、 项目环境依赖与多电脑协同开发
+为了能在不同的电脑上通过 GitHub 克隆代码后快速恢复开发，请确保目标电脑满足以下环境：
+
+1. 全局系统环境要求
+Node.js：建议安装 v18.x 或 v20.x LTS 版本。
+pnpm：推荐使用的前端包管理器。若未安装，运行：npm install -g pnpm。
+Rust 编译链：
+安装 Rustup：https://rustup.rs/。
+Windows 电脑需要安装 C++ 生成工具（通常通过 Visual Studio Installer 安装 "使用 C++ 的桌面开发" 工作负载）。
+Python 3：确保 python 已添加到系统环境变量 PATH 中。
+环境变量：
+必须在操作系统的用户环境变量或系统环境变量中，新建一个名为 DEEPSEEK_API_KEY 的变量，其值为你的 DeepSeek 官方 API Key。
+2. 跨电脑克隆后的快速启动步骤
+在新电脑上克隆仓库后，只需在项目根目录下依次执行以下命令：
+
+步骤 A：安装前端依赖
+pnpm install
+步骤 B：安装 Python Sidecar 依赖
+建议直接安装到系统全局，或者在你的全局 Python 环境下运行：
+
+pip install -r src-tauri/py_sidecar/requirements.txt
+步骤 C：一键启动开发预览
+pnpm tauri dev
+运行此命令后：
+
+Vite 会在 http://localhost:1420 启动前端热重载服务。
+Rust 编译器会编译 Tauri 外壳，并在 setup 阶段启动 Python 子进程。
+Python 子进程在 127.0.0.1:5678 默默等候前端的 API 请求。
+随后，高质感的 Tangerine 客户端窗口弹出，即可开始愉快的调试与开发。
+
+--------------------------------------------------------------------------------------------------------------------------------
+
+四、 核心逻辑与后续开发路线参考
+LocalStorage 持久化：当前对话会话存储在前端浏览器的 localStorage 中。由于 Tauri 2.0 默认会为应用划分独立的沙盒隔离区，所以该数据不会因清理系统浏览器垃圾而丢失。
+Sidecar 进程守卫：目前 Rust 启动了 Python，并在全局 State 注入了该进程句柄。
+后续计划：
+接入 Python 的 stream=True 流式响应，让 AI 的回复像打字机一样吐出。
+开发 Python 本地 Agent 框架，使助手能够通过 sys 或 os 库读取本机文件，实现本地 RAG 知识库或文件分析。
