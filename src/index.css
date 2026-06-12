@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 针对 Windows 11 风格的滚动条优化 */
+/* 优化 Windows 11 风格的滚动条 */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -13,16 +13,17 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(100, 100, 100, 0.2);
+  background: rgba(255, 255, 255, 0.1);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(100, 100, 100, 0.4);
+  background: rgba(255, 255, 255, 0.25);
 }
 
 body {
   margin: 0;
   font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
   overflow: hidden;
+  background-color: #202020;
 }
