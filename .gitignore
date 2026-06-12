@@ -1,22 +1,23 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+# ==============================================================================
+# 1. 操作系统与编辑器特定文件 (OS & IDEs)
+# ==============================================================================
+# Windows & macOS 系统垃圾
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
 
-node_modules
-dist
-dist-ssr
-*.local
-
-# Editor directories and files
+# 个人编辑器配置（不提交，防止覆盖他人配置）
 .vscode/*
 !.vscode/extensions.json
-.idea
-.DS_Store
+!.vscode/launch.json
+!.vscode/settings.json
+*.code-workspace
+.idea/
 *.suo
 *.ntvs*
 *.njsproj
@@ -24,42 +25,18 @@ dist-ssr
 *.sw?
 
 # ==============================================================================
-# 1. 操作系统 & 编辑器特定文件 (OS & IDEs)
-# ==============================================================================
-# Windows
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-$RECYCLE.BIN/
-
-# macOS
-.DS_Store
-.AppleDouble
-.LSOverride
-._*
-
-# VS Code
-.vscode/*
-!.vscode/extensions.json
-!.vscode/launch.json
-!.vscode/settings.json
-*.code-workspace
-
-# JetBrains (WebStorm, RustRover, PyCharm)
-.idea/
-
-# ==============================================================================
-# 2. 前端依赖与构建产物 (Node.js & Frontend)
+# 2. 前端依赖与构建产物 (React & Node.js)
 # ==============================================================================
 node_modules/
 /dist/
+/dist-ssr/
 /out/
-.pnpm-debug.log*
-yarn-error.log*
-npm-debug.log*
-pnpm-lock.yaml~
 
-# SvelteKit / Nuxt 等框架的临时目录
+# 前端日志与临时文件
+*.log
+*debug.log*
+yarn-error.log*
+pnpm-lock.yaml~
 .svelte-kit/
 .nuxt/
 .next/
@@ -68,21 +45,19 @@ pnpm-lock.yaml~
 # ==============================================================================
 # 3. Rust & Tauri 后端 (Rust & Tauri)
 # ==============================================================================
-# Rust 编译输出目录
+# Rust 编译输出（非常庞大，绝对不能提交）
 /src-tauri/target/
 
-# Tauri 自动生成的捆绑包和临时状态
+# Tauri 侧载二进制文件夹规则：
+# 忽略 binaries 文件夹下的所有打包成果（防止把几十MB的.exe提到GitHub）
 /src-tauri/binaries/*
+# 唯独保留 .gitkeep 文件，从而让 Git 能够追踪并保留 binaries 空文件夹
 !/src-tauri/binaries/.gitkeep
-
-# 排除 Python 打包到 binaries 中的临时 EXE，但保留配置好的 sidecar 可执行文件模板（如有）
-# 注意：如果您习惯把打包好的 pyinstaller 成果直接手动丢进 binaries，可以取消下面这行的注释
-# /src-tauri/binaries/*.exe
 
 # ==============================================================================
 # 4. Python 后端与虚拟环境 (Python & PyInstaller)
 # ==============================================================================
-# 虚拟环境 (Virtual Environments)
+# Python 虚拟环境
 .venv/
 venv/
 ENV/
@@ -97,22 +72,22 @@ python-env/
 .mypy_cache/
 .ruff_cache/
 
-# PyInstaller 打包产生的临时文件（Sidecar 打包必备）
+# PyInstaller 打包产生的临时构建文件
 /build/
 *.manifest
 *.spec
 
 # ==============================================================================
-# 5. AI Agent 特有：大模型、权重、本地数据库与敏感配置 (AI & DBs)
+# 5. AI、敏感配置与本地数据库 (AI & DBs)
 # ==============================================================================
-# 环境变量与密钥文件（绝对不能提交，包含 API Keys）
+# 环境变量与密钥文件（含 API Key，绝对不能泄露）
 .env
 .env.local
 .env.*.local
 *.pem
 *.key
 
-# 本地 LLM 模型文件、权重（避免意外提交几个G的GGUF/Safetensors文件）
+# 本地 LLM 模型文件、权重（避免意外提交数 GB 的大文件）
 *.gguf
 *.bin
 *.onnx
@@ -120,14 +95,10 @@ python-env/
 /models/
 /weights/
 
-# 向量数据库与本地数据存储 (例如 SQLite, ChromaDB, Faiss)
+# 向量数据库与本地数据存储
 *.db
 *.sqlite
 *.sqlite3
 /data/
 /vector_db/
 .chroma/
-
-# 运行日志
-*.log
-logs/
