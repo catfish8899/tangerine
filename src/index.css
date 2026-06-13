@@ -1,8 +1,12 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* src/index.css */
+/* 1. 使用 Tailwind v4 的正确引入指令 */
+@import "tailwindcss";
 
-/* 优化 Windows 11 风格的滚动条 */
+/* 2. 显式添加针对新创建的 components 文件夹和 React 源码的扫描源 */
+@source "./components/**/*.{ts,tsx}";
+@source "./**/*.{ts,tsx,html}";
+
+/* 3. 优化 Windows 11 风格的滚动条 */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
