@@ -36,8 +36,8 @@ tangerine/
 │   │   ├── MarkdownMessage.tsx    # [已修改] Markdown 解析器：接收外部 fontSize，动态自适应行内代码、表格及多级标题比例，进行 Fluent 风格渲染
 │   │   ├── Sidebar.tsx            # [新建] 侧边栏：管理聊天历史切换、右键菜单、新建会话以及跳转“设置”
 │   │   └── SettingsModal.tsx      # [已修改] 设置面板：重构为多 Tab 导航（“模型 API 设置”和“对话格式设置”）。新增字号调整单项，内置实时气泡效果预览
-│   ├── App.tsx                    # [已修改] 主界面组件：作为核心控制器，新增全局字号监听与分发、双系统（侧边栏+消息气泡）右键删除菜单、API Token 多路径捕获、以及严格的[用户-AI]交替顺序校验及 1 秒 Fluent 质感警示弹窗
-│   ├── index.css                  # [修改] Tailwind v4 规范升级：废弃旧版 v3 的 @tailwind 语法，引入 @import "tailwindcss" 并声明 @source 自定义扫描源
+│   ├── App.tsx                    # [已修改] 主界面组件：作为核心控制器，新增全局字号监听与分发、双系统（侧边栏+消息气泡）右键删除菜单、API Token 多路径捕获、以及严格的[用户-AI]交替顺序校验及 3 秒 Fluent 质感警示弹窗
+│   ├── index.css                  # [修改] Tailwind v4 规范升级：引入 @import "tailwindcss" 并声明 @source 自定义扫描源
 │   ├── main.tsx                   # [已修改] 前端入口文件：引入 React、App 组件并加载 index.css、highlight.js/styles/atom-one-dark.css
 │   └── vite-env.d.ts              # Vite 环境变量类型定义
 ├── src-tauri/                     # Rust 宿主后端源代码
@@ -86,7 +86,7 @@ PowerShell:
 
 --------------------------------------------------------------------------------------------------------------------------------
 
-四、 核心逻辑与后续开发路线参考
+四、 核心逻辑
 LocalStorage 多轨持久化：
 - 聊天历史：持久化在 LocalStorage 的 "tangerine_chat_sessions" 中。
 - 多 API 配置：持久化在 LocalStorage 的 "tangerine_api_settings" 中。
@@ -99,7 +99,4 @@ API 异常防御与对话守卫：
 - 对话交替校验：发送新问题时，会严格过滤系统报错并核对剩余消息顺序。如果不满足 [User, AI, User, AI] 交替对应的逻辑结构，发送动作会被拦截，并弹出一个 3 秒后自动淡出的警示浮窗。
 - Token 深度捕获：升级了多路径冗余捕获算法，彻底兼容各大云端提供商及本地 Fast API 转发中 `usage.total_tokens`、`usage_metadata`、`total_tokens` 等各种格式的 Token 字段解析，保障元数据完整呈现。
 
-后续计划：
-1. 衔接前端“设置面板”的数据到后端：将 React 端的 fetch 接口请求动态化，直接读取 `tangerine_api_settings` 中的当前提供商 `baseUrl` 进行转发，并适配多环境变量秘钥。
-2. 接入 Python 的 stream=True 流式响应，让 AI 的回复像打字机一样吐出。
-3. 开发 Python 本地 Agent 框架，使助手能够通过 sys 或 os 库读取本机文件，实现本地 RAG 知识库或文件分析。
+

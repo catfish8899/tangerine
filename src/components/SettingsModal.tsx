@@ -419,7 +419,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           style={{ fontSize: fontSize }} 
                           className="max-w-[85%] p-3 rounded-lg bg-[#2b6cb0] text-white rounded-tr-none leading-relaxed"
                         >
-                          哪片沙漠位于雾气氤氲的海边？
+                          什么是热狗🌭？
                         </div>
                       </div>
                       <div className="flex justify-start">
@@ -427,7 +427,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           style={{ fontSize: fontSize }} 
                           className="max-w-[85%] p-3 rounded-lg bg-[#2e2e2e] text-gray-200 border border-[#3a3a3a] rounded-tl-none leading-relaxed"
                         >
-                         纳米比亚的纳米布沙漠。
+                         热狗是非常热的狗🐕。
                         </div>
                       </div>
                     </div>

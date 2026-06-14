@@ -225,7 +225,7 @@ export default function App() {
 
     // 👇 校验：如果不满足交替顺序
     if (!validateAlternatingOrder(proposedMessages)) {
-      setWarningMessage("⚠️ 对话未遵循 用户--ai--用户 顺序结构，请删除对应气泡后再发送。");
+      setWarningMessage("⚠️ 对话未遵循 ai--用户 顺序结构，请删除对应气泡后再发送。");
       setTimeout(() => {
         setWarningMessage(null);
       }, 3000); // 持续 3 秒警示
