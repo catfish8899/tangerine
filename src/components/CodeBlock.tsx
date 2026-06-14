@@ -4,9 +4,10 @@ import { Copy, Check } from "lucide-react";
 interface CodeBlockProps {
   children: React.ReactNode;
   className?: string;
+  fontSize?: string; // 👈 动态传入当前字号
 }
 
-export default function CodeBlock({ children, className }: CodeBlockProps) {
+export default function CodeBlock({ children, className, fontSize = "12px" }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
   const codeRef = useRef<HTMLPreElement>(null);
 
@@ -18,6 +19,11 @@ export default function CodeBlock({ children, className }: CodeBlockProps) {
       setTimeout(() => setCopied(false), 2000);
     }
   };
+
+  // 代码文本一般比正文稍小，使用 chat 窗口主字号的 90%
+  const numericSize = parseFloat(fontSize);
+  const unit = fontSize.replace(/[0-9.]/g, "");
+  const codeFontSize = `${numericSize * 0.9}${unit}`;
 
   return (
     <div className="relative group my-4 rounded-lg border border-white/10 bg-black/30 overflow-hidden shadow-md">
@@ -42,7 +48,11 @@ export default function CodeBlock({ children, className }: CodeBlockProps) {
         </button>
       </div>
       {/* 代码内容区 */}
-      <pre ref={codeRef} className={`${className || ""} p-4 font-mono text-xs overflow-x-auto text-gray-200 leading-relaxed scrollbar-thin`}>
+      <pre 
+        ref={codeRef} 
+        style={{ fontSize: codeFontSize }}
+        className={`${className || ""} p-4 font-mono overflow-x-auto text-gray-200 leading-relaxed scrollbar-thin`}
+      >
         {children}
       </pre>
     </div>
