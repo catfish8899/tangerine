@@ -271,9 +271,10 @@ export default function App() {
 
       const data = await response.json();
       
-      // 👇 升级 Token 捕获机制：深层解构各种可能的 API 返回位置，彻底避免“未知”
+      // 👇 升级 Token 捕获机制：全方位覆盖各种可能的 Python 返回格式，绝不漏掉 usage 信息
       const tokensUsed = 
         data.usage?.total_tokens ?? 
+        data.usage?.total_token ?? 
         data.usage_metadata?.total_tokens ?? 
         data.total_tokens ?? 
         data.tokens_used ?? 

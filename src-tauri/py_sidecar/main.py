@@ -51,7 +51,24 @@ async def chat(request: ChatRequest):
         
         # 返回 AI 的文本
         ai_content = response.choices[0].message.content
-        return {"content": ai_content}
+        
+        # 提取并透传 Token 消耗信息给 React 前端
+        usage_info = None
+        if hasattr(response, "usage") and response.usage is not None:
+            # 兼容官方 OpenAI SDK 对象的转换方法，若无此方法则采用内置 __dict__ 手动序列化
+            if hasattr(response.usage, "model_dump"):
+                usage_info = response.usage.model_dump()
+            else:
+                usage_info = {
+                    "prompt_tokens": getattr(response.usage, "prompt_tokens", 0),
+                    "completion_tokens": getattr(response.usage, "completion_tokens", 0),
+                    "total_tokens": getattr(response.usage, "total_tokens", 0)
+                }
+        
+        return {
+            "content": ai_content,
+            "usage": usage_info
+        }
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
