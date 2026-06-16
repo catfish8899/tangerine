@@ -11,7 +11,11 @@ import {
   Sliders,
   Loader,
   Trash2,
-  AlertTriangle
+  AlertTriangle,
+  Edit3,
+  ChevronLeft,
+  ChevronRight,
+  RefreshCw
 } from "lucide-react";
 import Sidebar from "./components/Sidebar";
 import MarkdownMessage from "./components/MarkdownMessage";
@@ -25,6 +29,11 @@ interface Message {
   model?: string;
   tokensUsed?: number;
   timestamp?: number;
+  
+  // 👇 新增编辑和分支管理字段
+  isEditing?: boolean;
+  activeBranchIndex?: number;
+  branches?: Message[][]; // 存储该用户消息发起的分支（每个分支包含该节点之后的所有后续消息数组）
 }
 
 interface ChatSession {
@@ -88,16 +97,20 @@ export default function App() {
     targetSessionId: string | null;
   }>({ visible: false, x: 0, y: 0, targetSessionId: null });
 
-  // 👇 新增：对话气泡右键删除菜单状态
+  // 👇 新增/修改：对话气泡右键删除与编辑、发送分支菜单状态
   const [msgContextMenu, setMsgContextMenu] = useState<{
     visible: boolean;
     x: number;
     y: number;
     targetMessageId: string | null;
-  }>({ visible: false, x: 0, y: 0, targetMessageId: null });
+    targetMessageSender: "user" | "ai" | "system_err" | null;
+  }>({ visible: false, x: 0, y: 0, targetMessageId: null, targetMessageSender: null });
 
   const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0];
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // 用于辅助判断是否需要滚动的 Ref（记录上一次的消息总数）
+  const prevMessagesCountRef = useRef<number>(0);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
@@ -136,9 +149,14 @@ export default function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  // 👇 解决 Bug 1：只有当加载状态改变或者消息数量真正变多时才触发平滑滚动，而编辑消息状态更新时不滚动
   useEffect(() => {
-    scrollToBottom();
-  }, [activeSession?.messages, isLoading]);
+    const currentCount = activeSession?.messages?.length || 0;
+    if (currentCount > prevMessagesCountRef.current || isLoading) {
+      scrollToBottom();
+    }
+    prevMessagesCountRef.current = currentCount;
+  }, [activeSession?.messages?.length, isLoading]);
 
   const handleContextMenu = (e: React.MouseEvent, sessionId: string) => {
     e.preventDefault();
@@ -151,15 +169,16 @@ export default function App() {
     });
   };
 
-  // 👇 新增：呼出对话气泡删除菜单的回调
-  const handleMsgContextMenu = (e: React.MouseEvent, messageId: string) => {
+  // 👇 修改：呼出对话气泡删除菜单的回调（记录 sender 以区分是否可以发送分支）
+  const handleMsgContextMenu = (e: React.MouseEvent, messageId: string, sender: "user" | "ai" | "system_err") => {
     e.preventDefault();
     e.stopPropagation();
     setMsgContextMenu({
       visible: true,
       x: e.clientX,
       y: e.clientY,
-      targetMessageId: messageId
+      targetMessageId: messageId,
+      targetMessageSender: sender
     });
   };
 
@@ -207,6 +226,219 @@ export default function App() {
       }
     }
     return true;
+  };
+
+  // 👇 新增：气泡编辑功能支持
+  const handleStartEdit = (messageId: string) => {
+    setSessions(prev => prev.map(session => {
+      if (session.id === activeSessionId) {
+        return {
+          ...session,
+          messages: session.messages.map(m => m.id === messageId ? { ...m, isEditing: true } : m)
+        };
+      }
+      return session;
+    }));
+  };
+
+  const handleSaveEdit = (messageId: string, newText: string) => {
+    setSessions(prev => prev.map(session => {
+      if (session.id === activeSessionId) {
+        return {
+          ...session,
+          messages: session.messages.map(m => m.id === messageId ? { ...m, text: newText, isEditing: false } : m)
+        };
+      }
+      return session;
+    }));
+  };
+
+  const handleCancelEdit = (messageId: string) => {
+    setSessions(prev => prev.map(session => {
+      if (session.id === activeSessionId) {
+        return {
+          ...session,
+          messages: session.messages.map(m => m.id === messageId ? { ...m, isEditing: false } : m)
+        };
+      }
+      return session;
+    }));
+  };
+
+  // 👇 新增：在此用户消息上开启分支并发送消息
+  const handleResendMessage = async (messageId: string) => {
+    if (isLoading) return;
+
+    const session = sessions.find(s => s.id === activeSessionId);
+    if (!session) return;
+
+    const msgIdx = session.messages.findIndex(m => m.id === messageId);
+    if (msgIdx === -1) return;
+
+    const targetMsg = { ...session.messages[msgIdx] };
+    const precedingMessages = session.messages.slice(0, msgIdx + 1);
+    const subsequentMessages = session.messages.slice(msgIdx + 1);
+
+    // 拼装临时发送列表进行严格验证
+    if (!validateAlternatingOrder(precedingMessages)) {
+      setWarningMessage("⚠️ 对话未遵循 ai--用户 顺序结构，请删除对应气泡后再发送。");
+      setTimeout(() => setWarningMessage(null), 3000);
+      return;
+    }
+
+    // 初始化或归档当前分支下的后续消息
+    let branches = targetMsg.branches ? [...targetMsg.branches] : [];
+    let activeBranchIndex = targetMsg.activeBranchIndex ?? 0;
+
+    if (branches.length === 0) {
+      // 第一次分叉，将现有的后续消息归档为分支 1
+      branches = [subsequentMessages];
+      activeBranchIndex = 0;
+    } else {
+      // 保存正在浏览的分支的后续消息
+      branches[activeBranchIndex] = subsequentMessages;
+    }
+
+    // 新增分支 (分支索引自动 +1)，初始为空
+    branches.push([]);
+    activeBranchIndex = branches.length - 1;
+
+    targetMsg.branches = branches;
+    targetMsg.activeBranchIndex = activeBranchIndex;
+
+    const newMessagesList = [...session.messages.slice(0, msgIdx), targetMsg];
+
+    setSessions(prev => prev.map(s => {
+      if (s.id === activeSessionId) {
+        return { ...s, messages: newMessagesList };
+      }
+      return s;
+    }));
+
+    setIsLoading(true);
+
+    try {
+      const apiMessages = precedingMessages
+        .filter(m => m.sender !== "system_err")
+        .map(m => ({
+          role: m.sender === "user" ? "user" : "assistant",
+          content: m.text
+        }));
+
+      const response = await fetch("http://127.0.0.1:5678/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: selectedModel,
+          messages: [{ role: "system", content: "You are a helpful assistant" }, ...apiMessages]
+        })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.detail || "请求失败");
+      }
+
+      const data = await response.json();
+      const tokensUsed = 
+        data.usage?.total_tokens ?? 
+        data.usage?.total_token ?? 
+        data.usage_metadata?.total_tokens ?? 
+        data.total_tokens ?? 
+        data.tokens_used ?? 
+        data.response?.usage?.total_tokens ??
+        undefined;
+
+      const aiResponse: Message = { 
+        id: (Date.now() + 1).toString(), 
+        sender: "ai", 
+        text: data.content,
+        provider: "deepseek",
+        model: selectedModel,
+        tokensUsed: tokensUsed,
+        timestamp: Date.now()
+      };
+
+      setSessions(prev => prev.map(s => {
+        if (s.id === activeSessionId) {
+          const updatedMessages = s.messages.map(m => {
+            if (m.id === messageId) {
+              const updatedBranches = m.branches ? [...m.branches] : [];
+              const activeIdx = m.activeBranchIndex ?? 0;
+              updatedBranches[activeIdx] = [aiResponse];
+              return { ...m, branches: updatedBranches };
+            }
+            return m;
+          });
+          return { ...s, messages: [...updatedMessages, aiResponse] };
+        }
+        return s;
+      }));
+
+    } catch (error: any) {
+      const systemError: Message = {
+        id: (Date.now() + 1).toString(),
+        sender: "system_err",
+        text: `⚠️ 错误: ${error.message || "无法连接到本地 Python Sidecar"}`,
+        timestamp: Date.now()
+      };
+      setSessions(prev => prev.map(s => {
+        if (s.id === activeSessionId) {
+          const updatedMessages = s.messages.map(m => {
+            if (m.id === messageId) {
+              const updatedBranches = m.branches ? [...m.branches] : [];
+              const activeIdx = m.activeBranchIndex ?? 0;
+              updatedBranches[activeIdx] = [systemError];
+              return { ...m, branches: updatedBranches };
+            }
+            return m;
+          });
+          return { ...s, messages: [...updatedMessages, systemError] };
+        }
+        return s;
+      }));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 👇 新增：在对话分支间切换
+  const handleSwitchBranch = (messageId: string, direction: "prev" | "next") => {
+    setSessions(prev => prev.map(session => {
+      if (session.id !== activeSessionId) return session;
+
+      const idx = session.messages.findIndex(m => m.id === messageId);
+      if (idx === -1) return session;
+
+      const targetMsg = { ...session.messages[idx] };
+      let branches = targetMsg.branches ? [...targetMsg.branches] : [];
+      let activeBranchIndex = targetMsg.activeBranchIndex ?? 0;
+
+      if (branches.length <= 1) return session;
+
+      // 归档当前处于显示状态的后续消息
+      const subsequentMessages = session.messages.slice(idx + 1);
+      branches[activeBranchIndex] = subsequentMessages;
+
+      // 循环计算新的激活分支索引
+      let newIndex = activeBranchIndex;
+      if (direction === "prev") {
+        newIndex = activeBranchIndex === 0 ? branches.length - 1 : activeBranchIndex - 1;
+      } else {
+        newIndex = activeBranchIndex === branches.length - 1 ? 0 : activeBranchIndex + 1;
+      }
+
+      targetMsg.branches = branches;
+      targetMsg.activeBranchIndex = newIndex;
+
+      // 组装并拼接后续分支的消息列表
+      const nextMessages = [...session.messages.slice(0, idx), targetMsg, ...branches[newIndex]];
+
+      return {
+        ...session,
+        messages: nextMessages
+      };
+    }));
   };
 
   const handleSendMessage = async () => {
@@ -353,46 +585,106 @@ export default function App() {
             </div>
           ) : (
             <div className="max-w-3xl mx-auto space-y-6">
-              {activeSession.messages.map((msg) => (
-                <div key={msg.id} className={`flex gap-4 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  {msg.sender === 'ai' && (
-                    <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-amber-600 to-orange-400 flex items-center justify-center text-xs shrink-0 select-none">🤖</div>
-                  )}
-                  {/* 应用动态字号，并绑定 `onContextMenu` 支持气泡右键删除消息 */}
-                  <div 
-                    onContextMenu={(e) => handleMsgContextMenu(e, msg.id)}
-                    style={{ fontSize: chatFontSize }}
-                    className={`max-w-[85%] p-3.5 rounded-xl leading-relaxed flex flex-col gap-2.5 cursor-context-menu select-text transition-all duration-150 hover:ring-1 hover:ring-white/5 ${
-                      msg.sender === 'user' 
-                        ? 'bg-[#2b6cb0] text-white rounded-tr-none' 
-                        : msg.sender === 'system_err'
-                        ? 'bg-[#5c2d2d] text-red-200 border border-[#8c3d3d]'
-                        : 'bg-[#2e2e2e] text-gray-200 border border-[#3a3a3a] rounded-tl-none'
-                    }`}
-                  >
-                    <div className="flex-1">
-                      {msg.sender === 'ai' ? (
-                        <MarkdownMessage text={msg.text} fontSize={chatFontSize} />
-                      ) : (
-                        <p className="whitespace-pre-wrap select-text">{msg.text}</p>
+              {activeSession.messages.map((msg) => {
+                const isUser = msg.sender === 'user';
+                const hasBranches = msg.branches && msg.branches.length > 1;
+                const activeIdx = msg.activeBranchIndex ?? 0;
+                const branchesCount = msg.branches ? msg.branches.length : 0;
+
+                return (
+                  <div key={msg.id} className={`flex gap-4 ${isUser ? 'justify-end' : 'justify-start'}`}>
+                    {!isUser && msg.sender !== 'system_err' && (
+                      <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-amber-600 to-orange-400 flex items-center justify-center text-xs shrink-0 select-none">🤖</div>
+                    )}
+                    
+                    {/* 应用动态字号，并绑定 `onContextMenu` 支持气泡右键自定义菜单 */}
+                    <div 
+                      onContextMenu={(e) => handleMsgContextMenu(e, msg.id, msg.sender)}
+                      style={{ fontSize: chatFontSize }}
+                      className={`max-w-[85%] p-3.5 rounded-xl leading-relaxed flex flex-col gap-2 cursor-context-menu select-text transition-all duration-150 hover:ring-1 hover:ring-white/5 relative group ${
+                        isUser 
+                          ? 'bg-[#2b6cb0] text-white rounded-tr-none' 
+                          : msg.sender === 'system_err'
+                          ? 'bg-[#5c2d2d] text-red-200 border border-[#8c3d3d]'
+                          : 'bg-[#2e2e2e] text-gray-200 border border-[#3a3a3a] rounded-tl-none'
+                      }`}
+                    >
+                      <div className="flex-1 min-w-[200px]">
+                        {msg.isEditing ? (
+                          // 👇 编辑输入框模式
+                          <div className="flex flex-col gap-2">
+                            <textarea
+                              defaultValue={msg.text}
+                              id={`edit-area-${msg.id}`}
+                              className="w-full bg-[#1e1e1e] text-white text-xs border border-[#444] rounded p-2 focus:outline-none focus:border-blue-500 resize-y"
+                              rows={3}
+                            />
+                            <div className="flex justify-end gap-1.5">
+                              <button
+                                onClick={() => {
+                                  const textVal = (document.getElementById(`edit-area-${msg.id}`) as HTMLTextAreaElement)?.value || "";
+                                  handleSaveEdit(msg.id, textVal);
+                                }}
+                                className="px-2 py-1 bg-green-700 hover:bg-green-600 rounded text-[10px] font-medium transition-colors cursor-pointer"
+                              >
+                                保存
+                              </button>
+                              {/* 👇 Bug 2：将“取取消”修复为“取消” */}
+                              <button
+                                onClick={() => handleCancelEdit(msg.id)}
+                                className="px-2 py-1 bg-gray-600 hover:bg-gray-500 rounded text-[10px] font-medium transition-colors cursor-pointer"
+                              >
+                                取消
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          // 👇 正常渲染模式
+                          <>
+                            {msg.sender === 'ai' ? (
+                              <MarkdownMessage text={msg.text} fontSize={chatFontSize} />
+                            ) : (
+                              <p className="whitespace-pre-wrap select-text">{msg.text}</p>
+                            )}
+                          </>
+                        )}
+                      </div>
+
+                      {/* 👇 Bug 3：修复多余的嵌套 <> 符号，里面直接写 ${activeIdx + 1} / ${branchesCount} */}
+                      {isUser && hasBranches && !msg.isEditing && (
+                        <div className="mt-1 flex items-center justify-end gap-1.5 text-[10px] text-blue-200/80 font-mono select-none">
+                          <button 
+                            onClick={() => handleSwitchBranch(msg.id, "prev")}
+                            className="p-0.5 hover:bg-white/10 rounded transition-colors cursor-pointer"
+                          >
+                            <ChevronLeft size={10} />
+                          </button>
+                          <span>{`${activeIdx + 1} / ${branchesCount}`}</span>
+                          <button 
+                            onClick={() => handleSwitchBranch(msg.id, "next")}
+                            className="p-0.5 hover:bg-white/10 rounded transition-colors cursor-pointer"
+                          >
+                            <ChevronRight size={10} />
+                          </button>
+                        </div>
+                      )}
+
+                      {/* AI 消息元数据 */}
+                      {msg.sender === 'ai' && !msg.isEditing && (
+                        <div className="mt-1 pt-1.5 border-t border-white/5 flex items-center gap-2 text-[10px] text-gray-500 font-mono select-none">
+                          <span>提供商: <strong className="text-gray-400 font-medium">{msg.provider || "未知"}</strong></span>
+                          <span className="opacity-30">•</span>
+                          <span>模型: <strong className="text-gray-400 font-medium">{msg.model || "未知"}</strong></span>
+                          <span className="opacity-30">•</span>
+                          <span>Token消耗: <strong className="text-gray-400 font-medium">{msg.tokensUsed !== undefined ? msg.tokensUsed : "未知"}</strong></span>
+                          <span className="opacity-30">•</span>
+                          <span>时间: <strong className="text-gray-400 font-medium">{format12HourTime(msg.timestamp)}</strong></span>
+                        </div>
                       )}
                     </div>
-
-                    {/* AI 消息元数据 */}
-                    {msg.sender === 'ai' && (
-                      <div className="mt-1 pt-1.5 border-t border-white/5 flex items-center gap-2 text-[10px] text-gray-500 font-mono select-none">
-                        <span>提供商: <strong className="text-gray-400 font-medium">{msg.provider || "未知"}</strong></span>
-                        <span className="opacity-30">•</span>
-                        <span>模型: <strong className="text-gray-400 font-medium">{msg.model || "未知"}</strong></span>
-                        <span className="opacity-30">•</span>
-                        <span>Token消耗: <strong className="text-gray-400 font-medium">{msg.tokensUsed !== undefined ? msg.tokensUsed : "未知"}</strong></span>
-                        <span className="opacity-30">•</span>
-                        <span>时间: <strong className="text-gray-400 font-medium">{format12HourTime(msg.timestamp)}</strong></span>
-                      </div>
-                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {isLoading && (
                 <div className="flex gap-4 justify-start">
                   <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-amber-600 to-orange-400 flex items-center justify-center text-xs shrink-0 select-none">🤖</div>
@@ -442,7 +734,7 @@ export default function App() {
                 <div className="relative">
                   <button 
                     onClick={(e) => { e.stopPropagation(); setShowModelDropdown(!showModelDropdown); }}
-                    className="text-[10px] text-gray-400 hover:text-white font-semibold bg-[#202020] px-2.5 py-1.5 rounded border border-[#353535] flex items-center gap-1.5 transition-colors"
+                    className="text-[10px] text-gray-400 hover:text-white font-semibold bg-[#202020] px-2.5 py-1.5 rounded border border-[#353535] flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
                     <span className={`w-1.5 h-1.5 rounded-full ${selectedModel === "deepseek-v4-pro" ? "bg-amber-500 animate-pulse" : "bg-[#f97316]"}`}></span>
                     {selectedModel}
@@ -453,14 +745,14 @@ export default function App() {
                     <div className="absolute bottom-full right-0 mb-2 w-48 bg-[#252526] border border-[#3e3e3e] rounded-lg shadow-xl py-1 z-50">
                       <button
                         onClick={() => { setSelectedModel("deepseek-v4-flash"); setShowModelDropdown(false); }}
-                        className={`w-full text-left px-3 py-2 text-xs hover:bg-[#333] transition-colors flex flex-col ${selectedModel === "deepseek-v4-flash" ? "text-amber-400 font-semibold" : "text-gray-300"}`}
+                        className={`w-full text-left px-3 py-2 text-xs hover:bg-[#333] transition-colors flex flex-col cursor-pointer ${selectedModel === "deepseek-v4-flash" ? "text-amber-400 font-semibold" : "text-gray-300"}`}
                       >
                         <span>deepseek-v4-flash</span>
                         <span className="text-[9px] text-gray-500 font-normal">快速且轻量的日常对话</span>
                       </button>
                       <button
                         onClick={() => { setSelectedModel("deepseek-v4-pro"); setShowModelDropdown(false); }}
-                        className={`w-full text-left px-3 py-2 text-xs hover:bg-[#333] transition-colors flex flex-col ${selectedModel === "deepseek-v4-pro" ? "text-amber-400 font-semibold" : "text-gray-300"}`}
+                        className={`w-full text-left px-3 py-2 text-xs hover:bg-[#333] transition-colors flex flex-col cursor-pointer ${selectedModel === "deepseek-v4-pro" ? "text-amber-400 font-semibold" : "text-gray-300"}`}
                       >
                         <span>deepseek-v4-pro</span>
                         <span className="text-[9px] text-amber-500 font-normal">支持深度思考 (Reasoning)</span>
@@ -472,7 +764,7 @@ export default function App() {
                 <button 
                   onClick={handleSendMessage}
                   disabled={!inputText.trim() || isLoading}
-                  className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${
+                  className={`w-7 h-7 rounded-full flex items-center justify-center transition-all cursor-pointer ${
                     inputText.trim() && !isLoading ? 'bg-white text-black hover:bg-gray-200' : 'bg-[#3e3e3e] text-gray-500 cursor-not-allowed'
                   }`}
                 >
@@ -497,7 +789,7 @@ export default function App() {
               if (contextMenu.targetSessionId) { handleDeleteSession(contextMenu.targetSessionId); }
               setContextMenu(prev => ({ ...prev, visible: false }));
             }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-[#333] hover:text-red-300 transition-colors text-left"
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-[#333] hover:text-red-300 transition-colors text-left cursor-pointer"
           >
             <Trash2 size={13} />
             <span>删除对话</span>
@@ -505,12 +797,42 @@ export default function App() {
         </div>
       )}
 
-      {/* 👇 4. 新增：对话气泡右键上下文删除菜单 */}
+      {/* 👇 4. 修改：对话气泡右键多功能菜单 */}
       {msgContextMenu.visible && (
         <div 
           style={{ top: msgContextMenu.y, left: msgContextMenu.x }}
-          className="fixed bg-[#232324] border border-[#38383a] rounded-lg shadow-2xl py-1 w-32 z-[9999] animate-in fade-in duration-100"
+          className="fixed bg-[#232324] border border-[#38383a] rounded-lg shadow-2xl py-1 w-44 z-[9999] animate-in fade-in duration-100 font-sans"
         >
+          {/* 所有消息都可以被编辑 */}
+          <button
+            onClick={() => {
+              if (msgContextMenu.targetMessageId) {
+                handleStartEdit(msgContextMenu.targetMessageId);
+              }
+              setMsgContextMenu(prev => ({ ...prev, visible: false }));
+            }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-[#333] hover:text-white transition-colors text-left cursor-pointer"
+          >
+            <Edit3 size={13} className="text-blue-400" />
+            <span>编辑此消息</span>
+          </button>
+
+          {/* 只能选中用户说的某句话才显示“发送这条消息”来开启新分支 */}
+          {msgContextMenu.targetMessageSender === "user" && (
+            <button
+              onClick={() => {
+                if (msgContextMenu.targetMessageId) {
+                  handleResendMessage(msgContextMenu.targetMessageId);
+                }
+                setMsgContextMenu(prev => ({ ...prev, visible: false }));
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-[#333] hover:text-white transition-colors text-left border-t border-[#303030] cursor-pointer"
+            >
+              <RefreshCw size={13} className="text-amber-400" />
+              <span>发送这条消息 (新分支)</span>
+            </button>
+          )}
+
           <button
             onClick={() => {
               if (msgContextMenu.targetMessageId) {
@@ -518,7 +840,7 @@ export default function App() {
               }
               setMsgContextMenu(prev => ({ ...prev, visible: false }));
             }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-[#333] hover:text-red-300 transition-colors text-left"
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-[#333] hover:text-red-300 transition-colors text-left border-t border-[#303030] cursor-pointer"
           >
             <Trash2 size={13} />
             <span>删除此消息</span>
