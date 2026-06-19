@@ -116,7 +116,7 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
   }, [sessions]);
 
-  // 监听全局点击、键盘 ESC 按键和字号设置修改
+  // 监听全局点击、键盘 ESC 按键 and 字号设置修改
   useEffect(() => {
     const handleGlobalClick = () => {
       setContextMenu(prev => ({ ...prev, visible: false }));
@@ -597,22 +597,23 @@ export default function App() {
                       <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-amber-600 to-orange-400 flex items-center justify-center text-xs shrink-0 select-none">🤖</div>
                     )}
                     
-                    {/* 应用动态字号，并绑定 `onContextMenu` 支持气泡右键自定义菜单 */}
+                    {/* 应用动态字号，并绑定 `onContextMenu` 支持气泡右键自定义菜单。此处增加了 w-fit 限制 */}
                     <div 
                       onContextMenu={(e) => handleMsgContextMenu(e, msg.id, msg.sender)}
                       style={{ fontSize: chatFontSize }}
-                      className={`max-w-[85%] p-3.5 rounded-xl leading-relaxed flex flex-col gap-2 cursor-context-menu select-text transition-all duration-150 hover:ring-1 hover:ring-white/5 relative group ${
+                      className={`max-w-[85%] w-fit p-3.5 rounded-xl leading-relaxed flex flex-col gap-2 cursor-context-menu select-text transition-all duration-150 hover:ring-1 hover:ring-white/5 relative group ${
                         isUser 
-                          ? 'bg-[#2b6cb0] text-white rounded-tr-none' 
+                          ? 'bg-[#2b6cb0] text-white rounded-tr-none ml-auto' 
                           : msg.sender === 'system_err'
                           ? 'bg-[#5c2d2d] text-red-200 border border-[#8c3d3d]'
                           : 'bg-[#2e2e2e] text-gray-200 border border-[#3a3a3a] rounded-tl-none'
                       }`}
                     >
-                      <div className="flex-1 min-w-[200px]">
+                      {/* 将 flex-1 撑满外层的盒子，替换为 w-fit 以紧密包裹，且对 editing 框的宽度设定了保障 */}
+                      <div className="w-fit max-w-full">
                         {msg.isEditing ? (
                           // 👇 编辑输入框模式
-                          <div className="flex flex-col gap-2">
+                          <div className="flex flex-col gap-2 w-[320px] max-w-full">
                             <textarea
                               defaultValue={msg.text}
                               id={`edit-area-${msg.id}`}
@@ -644,7 +645,7 @@ export default function App() {
                             {msg.sender === 'ai' ? (
                               <MarkdownMessage text={msg.text} fontSize={chatFontSize} />
                             ) : (
-                              <p className="whitespace-pre-wrap select-text">{msg.text}</p>
+                              <p className="whitespace-pre-wrap select-text break-all">{msg.text}</p>
                             )}
                           </>
                         )}
