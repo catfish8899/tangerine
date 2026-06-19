@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import Sidebar from "./components/Sidebar";
 import MarkdownMessage from "./components/MarkdownMessage";
-import SettingsModal from "./components/SettingsModal";
+import SettingsModal, { ApiProviderConfig } from "./components/SettingsModal";
 
 interface Message {
   id: string;
@@ -44,6 +44,7 @@ interface ChatSession {
 
 const STORAGE_KEY = "tangerine_chat_sessions";
 const FONT_SIZE_STORAGE_KEY = "tangerine_font_size";
+const SETTINGS_STORAGE_KEY = "tangerine_api_settings";
 
 // 辅助函数：将时间戳格式化为 12 小时制
 function format12HourTime(timestamp?: number): string {
@@ -77,7 +78,11 @@ export default function App() {
   
   const [inputText, setInputText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<"deepseek-v4-flash" | "deepseek-v4-pro">("deepseek-v4-flash");
+
+  // 👇 动态状态：替代写死联合类型的 selectedModel 与 availableModels
+  const [selectedModel, setSelectedModel] = useState<string>("deepseek-v4-flash");
+  const [availableModels, setAvailableModels] = useState<string[]>(["deepseek-v4-flash", "deepseek-v4-pro"]);
+
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   
@@ -97,7 +102,7 @@ export default function App() {
     targetSessionId: string | null;
   }>({ visible: false, x: 0, y: 0, targetSessionId: null });
 
-  // 👇 新增/修改：对话气泡右键删除与编辑、发送分支菜单状态
+  // 👇 对话气泡右键删除与编辑、发送分支菜单状态
   const [msgContextMenu, setMsgContextMenu] = useState<{
     visible: boolean;
     x: number;
@@ -116,8 +121,35 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
   }, [sessions]);
 
-  // 监听全局点击、键盘 ESC 按键 and 字号设置修改
+  // 从本地持久化中动态同步和载入模型配置
+  const syncModelsFromSettings = () => {
+    const savedConfigs = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (savedConfigs) {
+      try {
+        const parsed: ApiProviderConfig[] = JSON.parse(savedConfigs);
+        // 汇集所有的模型
+        const allModels = parsed.flatMap(cfg => cfg.models);
+        if (allModels.length > 0) {
+          setAvailableModels(allModels);
+          // 如果旧的选中模型不再存在，则重置为第一项
+          if (!allModels.includes(selectedModel)) {
+            setSelectedModel(allModels[0]);
+          }
+          return;
+        }
+      } catch (e) {
+        console.error("加载模型列表失败：", e);
+      }
+    }
+    // 默认备用项
+    setAvailableModels(["deepseek-v4-flash", "deepseek-v4-pro"]);
+  };
+
+  // 监听全局点击、键盘 ESC 按键、字号及模型配置修改
   useEffect(() => {
+    // 页面初始化同步一次模型
+    syncModelsFromSettings();
+
     const handleGlobalClick = () => {
       setContextMenu(prev => ({ ...prev, visible: false }));
       setMsgContextMenu(prev => ({ ...prev, visible: false })); // 全局点击关闭消息气泡右键菜单
@@ -135,21 +167,28 @@ export default function App() {
       setChatFontSize(size);
     };
 
+    // 监听本地配置变化，随时刷新模型列表
+    const handleSettingsChange = () => {
+      syncModelsFromSettings();
+    };
+
     window.addEventListener("click", handleGlobalClick);
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("storage_font_size_changed", handleFontSizeChange);
+    window.addEventListener("tangerine_api_settings_changed", handleSettingsChange);
     return () => {
       window.removeEventListener("click", handleGlobalClick);
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("storage_font_size_changed", handleFontSizeChange);
+      window.removeEventListener("tangerine_api_settings_changed", handleSettingsChange);
     };
-  }, []);
+  }, [selectedModel]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  // 👇 解决 Bug 1：只有当加载状态改变或者消息数量真正变多时才触发平滑滚动，而编辑消息状态更新时不滚动
+  // 只有当加载状态改变或者消息数量真正变多时才触发平滑滚动，而编辑消息状态更新时不滚动
   useEffect(() => {
     const currentCount = activeSession?.messages?.length || 0;
     if (currentCount > prevMessagesCountRef.current || isLoading) {
@@ -169,7 +208,7 @@ export default function App() {
     });
   };
 
-  // 👇 修改：呼出对话气泡删除菜单的回调（记录 sender 以区分是否可以发送分支）
+  // 呼出对话气泡删除菜单的回调（记录 sender 以区分是否可以发送分支）
   const handleMsgContextMenu = (e: React.MouseEvent, messageId: string, sender: "user" | "ai" | "system_err") => {
     e.preventDefault();
     e.stopPropagation();
@@ -196,7 +235,7 @@ export default function App() {
     }
   };
 
-  // 👇 新增：物理删除单个消息气泡，直接从 messages 过滤，确保之后发送不计入上下文
+  // 物理删除单个消息气泡，直接从 messages 过滤，确保之后发送不计入上下文
   const handleDeleteMessage = (messageId: string) => {
     setSessions(prev => prev.map(session => {
       if (session.id === activeSessionId) {
@@ -215,7 +254,7 @@ export default function App() {
     setActiveSessionId(newId);
   };
 
-  // 👇 严格守卫校验：过滤系统错误后，消息列表必须完美呈现 [user, ai, user, ai ...] 的交替结构
+  // 严格守卫校验：过滤系统错误后，消息列表必须完美呈现 [user, ai, user, ai ...] 的交替结构
   const validateAlternatingOrder = (tempMessagesList: Message[]): boolean => {
     const chatOnly = tempMessagesList.filter(m => m.sender !== "system_err");
     if (chatOnly.length === 0) return true;
@@ -228,7 +267,7 @@ export default function App() {
     return true;
   };
 
-  // 👇 新增：气泡编辑功能支持
+  // 气泡编辑功能支持
   const handleStartEdit = (messageId: string) => {
     setSessions(prev => prev.map(session => {
       if (session.id === activeSessionId) {
@@ -265,7 +304,7 @@ export default function App() {
     }));
   };
 
-  // 👇 新增：在此用户消息上开启分支并发送消息
+  // 在此用户消息上开启分支并发送消息
   const handleResendMessage = async (messageId: string) => {
     if (isLoading) return;
 
@@ -353,7 +392,7 @@ export default function App() {
         id: (Date.now() + 1).toString(), 
         sender: "ai", 
         text: data.content,
-        provider: "deepseek",
+        provider: selectedModel.toLowerCase().includes("deepseek") ? "deepseek" : "ollama",
         model: selectedModel,
         tokensUsed: tokensUsed,
         timestamp: Date.now()
@@ -402,7 +441,7 @@ export default function App() {
     }
   };
 
-  // 👇 新增：在对话分支间切换
+  // 在对话分支间切换
   const handleSwitchBranch = (messageId: string, direction: "prev" | "next") => {
     setSessions(prev => prev.map(session => {
       if (session.id !== activeSessionId) return session;
@@ -517,7 +556,7 @@ export default function App() {
         id: (Date.now() + 1).toString(), 
         sender: "ai", 
         text: data.content,
-        provider: "deepseek",
+        provider: selectedModel.toLowerCase().includes("deepseek") ? "deepseek" : "ollama",
         model: selectedModel,
         tokensUsed: tokensUsed,
         timestamp: Date.now()
@@ -630,7 +669,6 @@ export default function App() {
                               >
                                 保存
                               </button>
-                              {/* 👇 Bug 2：将“取取消”修复为“取消” */}
                               <button
                                 onClick={() => handleCancelEdit(msg.id)}
                                 className="px-2 py-1 bg-gray-600 hover:bg-gray-500 rounded text-[10px] font-medium transition-colors cursor-pointer"
@@ -651,7 +689,6 @@ export default function App() {
                         )}
                       </div>
 
-                      {/* 👇 Bug 3：修复多余的嵌套 <> 符号，里面直接写 ${activeIdx + 1} / ${branchesCount} */}
                       {isUser && hasBranches && !msg.isEditing && (
                         <div className="mt-1 flex items-center justify-end gap-1.5 text-[10px] text-blue-200/80 font-mono select-none">
                           <button 
@@ -694,7 +731,7 @@ export default function App() {
                     className="bg-[#2e2e2e] text-gray-400 border border-[#3a3a3a] p-3.5 rounded-xl flex items-center gap-2"
                   >
                     <Loader size={12} className="animate-spin text-[#4ea1db]" />
-                    <span>DeepSeek 正在思考中...</span>
+                    <span>{selectedModel.toLowerCase().includes("deepseek") ? "DeepSeek 正在思考中..." : "本地模型正在推理中..."}</span>
                   </div>
                 </div>
               )}
@@ -731,33 +768,41 @@ export default function App() {
                 <button className="p-1.5 hover:bg-[#383838] hover:text-white rounded transition-colors"><Sliders size={14} /></button>
               </div>
 
+              {/* 右侧发送及模型下拉选择器 */}
               <div className="flex items-center gap-2 relative">
                 <div className="relative">
                   <button 
                     onClick={(e) => { e.stopPropagation(); setShowModelDropdown(!showModelDropdown); }}
                     className="text-[10px] text-gray-400 hover:text-white font-semibold bg-[#202020] px-2.5 py-1.5 rounded border border-[#353535] flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
-                    <span className={`w-1.5 h-1.5 rounded-full ${selectedModel === "deepseek-v4-pro" ? "bg-amber-500 animate-pulse" : "bg-[#f97316]"}`}></span>
+                    {/* 根据不同的模型属性，改变状态圆点颜色 */}
+                    <span className={`w-1.5 h-1.5 rounded-full ${
+                      selectedModel.includes("pro") 
+                        ? "bg-amber-500 animate-pulse" 
+                        : selectedModel.includes("deepseek") 
+                        ? "bg-[#f97316]" 
+                        : "bg-emerald-400 animate-pulse"
+                    }`}></span>
                     {selectedModel}
                     <ChevronUp size={10} className={`transform transition-transform ${showModelDropdown ? 'rotate-180' : ''}`} />
                   </button>
 
                   {showModelDropdown && (
-                    <div className="absolute bottom-full right-0 mb-2 w-48 bg-[#252526] border border-[#3e3e3e] rounded-lg shadow-xl py-1 z-50">
-                      <button
-                        onClick={() => { setSelectedModel("deepseek-v4-flash"); setShowModelDropdown(false); }}
-                        className={`w-full text-left px-3 py-2 text-xs hover:bg-[#333] transition-colors flex flex-col cursor-pointer ${selectedModel === "deepseek-v4-flash" ? "text-amber-400 font-semibold" : "text-gray-300"}`}
-                      >
-                        <span>deepseek-v4-flash</span>
-                        <span className="text-[9px] text-gray-500 font-normal">快速且轻量的日常对话</span>
-                      </button>
-                      <button
-                        onClick={() => { setSelectedModel("deepseek-v4-pro"); setShowModelDropdown(false); }}
-                        className={`w-full text-left px-3 py-2 text-xs hover:bg-[#333] transition-colors flex flex-col cursor-pointer ${selectedModel === "deepseek-v4-pro" ? "text-amber-400 font-semibold" : "text-gray-300"}`}
-                      >
-                        <span>deepseek-v4-pro</span>
-                        <span className="text-[9px] text-amber-500 font-normal">支持深度思考 (Reasoning)</span>
-                      </button>
+                    <div className="absolute bottom-full right-0 mb-2 w-48 max-h-60 overflow-y-auto scrollbar-thin bg-[#252526] border border-[#3e3e3e] rounded-lg shadow-xl py-1 z-50">
+                      {availableModels.map((modelName) => (
+                        <button
+                          key={modelName}
+                          onClick={() => { setSelectedModel(modelName); setShowModelDropdown(false); }}
+                          className={`w-full text-left px-3 py-2 text-xs hover:bg-[#333] transition-colors flex flex-col cursor-pointer ${
+                            selectedModel === modelName ? "text-amber-400 font-semibold" : "text-gray-300"
+                          }`}
+                        >
+                          <span>{modelName}</span>
+                          <span className="text-[9px] text-gray-500 font-normal">
+                            {modelName.includes("deepseek") ? "云端部署模型" : "Ollama 本地模型"}
+                          </span>
+                        </button>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -798,7 +843,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 👇 4. 修改：对话气泡右键多功能菜单 */}
+      {/* 4. 对话气泡右键多功能菜单 */}
       {msgContextMenu.visible && (
         <div 
           style={{ top: msgContextMenu.y, left: msgContextMenu.x }}
