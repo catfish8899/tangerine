@@ -1,81 +1,21 @@
-// src/App.tsx 的完整修改版
+// src/App.tsx 的完整修改解耦版
 import { useState, useRef, useEffect } from "react";
 import { 
-  Send, 
-  ChevronUp,
   Loader,
   Trash2,
   AlertTriangle,
   Edit3,
-  ChevronLeft,
-  ChevronRight,
-  RefreshCw,
-  Paperclip,
-  X,
-  FileCode,
-  FileText,
-  FileAudio,
-  FileSpreadsheet,
-  FileImage
+  RefreshCw
 } from "lucide-react";
 import Sidebar from "./components/Sidebar";
-import MarkdownMessage from "./components/MarkdownMessage";
 import SettingsModal, { ApiProviderConfig } from "./components/SettingsModal";
-
-interface Message {
-  id: string;
-  sender: "user" | "ai" | "system_err";
-  text: string;
-  provider?: string;
-  model?: string;
-  tokensUsed?: number;
-  timestamp?: number;
-  filePaths?: string[]; // 记录本次消息关联的文件绝对路径列表
-  
-  // 👇 编辑和分支管理字段
-  isEditing?: boolean;
-  activeBranchIndex?: number;
-  branches?: Message[][]; // 存储该用户消息发起的分支（每个分支包含该节点之后的所有后续消息数组）
-}
-
-interface ChatSession {
-  id: string;
-  title: string;
-  messages: Message[];
-}
-
-interface AttachmentFile {
-  name: string;
-  path: string;
-  type: 'image' | 'audio' | 'code' | 'office' | 'other';
-}
+import MessageItem from "./components/MessageItem";
+import ChatInput from "./components/ChatInput";
+import { Message, ChatSession, AttachmentFile, getFileType } from "./types/chat";
 
 const STORAGE_KEY = "tangerine_chat_sessions";
 const FONT_SIZE_STORAGE_KEY = "tangerine_font_size";
 const SETTINGS_STORAGE_KEY = "tangerine_api_settings";
-
-// 辅助函数：根据文件名推断附件卡片展示类型
-function getFileType(fileName: string): 'image' | 'audio' | 'code' | 'office' | 'other' {
-  const ext = fileName.split('.').pop()?.toLowerCase() || '';
-  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext)) return 'image';
-  if (['mp3', 'wav', 'ogg', 'm4a'].includes(ext)) return 'audio';
-  if (['py', 'js', 'ts', 'tsx', 'jsx', 'rs', 'go', 'cpp', 'c', 'html', 'css', 'json', 'yaml', 'sh'].includes(ext)) return 'code';
-  if (['docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'pdf', 'rtf', 'epub', 'mobi'].includes(ext)) return 'office';
-  return 'other';
-}
-
-// 辅助函数：将时间戳格式化为 12 小时制
-function format12HourTime(timestamp?: number): string {
-  if (!timestamp) return "未知";
-  const date = new Date(timestamp);
-  let hours = date.getHours();
-  const minutes = date.getMinutes();
-  const ampm = hours >= 12 ? "下午" : "上午";
-  hours = hours % 12;
-  hours = hours ? hours : 12; // 0 点应该显示为 12 点
-  const minutesStr = minutes < 10 ? "0" + minutes : minutes;
-  return `${ampm} ${hours}:${minutesStr}`;
-}
 
 export default function App() {
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
@@ -96,21 +36,13 @@ export default function App() {
   
   const [inputText, setInputText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-
-  // 附件管理状态
   const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
-
-  // 👇 动态状态：替代写死联合类型的 selectedModel 与 availableModels
   const [selectedModel, setSelectedModel] = useState<string>("deepseek-v4-flash");
   const [availableModels, setAvailableModels] = useState<string[]>(["deepseek-v4-flash", "deepseek-v4-pro"]);
-
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  
-  // 警示弹窗状态
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
 
-  // 主页面对话文字大小状态
   const [chatFontSize, setChatFontSize] = useState<string>(() => {
     return localStorage.getItem(FONT_SIZE_STORAGE_KEY) || "12px";
   });
@@ -123,26 +55,23 @@ export default function App() {
     targetSessionId: string | null;
   }>({ visible: false, x: 0, y: 0, targetSessionId: null });
 
-  // 👇 对话气泡右键删除与编辑、发送分支菜单状态
+  // 对话气泡右键多功能菜单
   const [msgContextMenu, setMsgContextMenu] = useState<{
     visible: boolean;
     x: number;
     y: number;
     targetMessageId: string | null;
-    targetMessageSender: "user" | "ai" | "system_err" | null;
+    targetMessageSender: Message["sender"] | null;
   }>({ visible: false, x: 0, y: 0, targetMessageId: null, targetMessageSender: null });
 
   const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0];
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  
-  // 用于辅助判断是否需要滚动的 Ref（记录上一次的消息总数）
   const prevMessagesCountRef = useRef<number>(0);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
   }, [sessions]);
 
-  // 从本地持久化中动态同步和载入模型配置
   const syncModelsFromSettings = () => {
     const savedConfigs = localStorage.getItem(SETTINGS_STORAGE_KEY);
     if (savedConfigs) {
@@ -163,7 +92,6 @@ export default function App() {
     setAvailableModels(["deepseek-v4-flash", "deepseek-v4-pro"]);
   };
 
-  // 监听全局点击、键盘 ESC 按键、字号及模型配置修改
   useEffect(() => {
     syncModelsFromSettings();
 
@@ -223,7 +151,7 @@ export default function App() {
     });
   };
 
-  const handleMsgContextMenu = (e: React.MouseEvent, messageId: string, sender: "user" | "ai" | "system_err") => {
+  const handleMsgContextMenu = (e: React.MouseEvent, messageId: string, sender: Message["sender"]) => {
     e.preventDefault();
     e.stopPropagation();
     setMsgContextMenu({
@@ -315,7 +243,6 @@ export default function App() {
     }));
   };
 
-  // 👇 修改：通过 Python Sidecar 接口拉起 Windows 原生文件选择对话框，前端免依赖
   const handleSelectFiles = async () => {
     try {
       const response = await fetch("http://127.0.0.1:5678/api/select-files", {
@@ -344,7 +271,6 @@ export default function App() {
     setAttachments(prev => prev.filter((_, i) => i !== idx));
   };
 
-  // 在此用户消息上开启分支并发送消息
   const handleResendMessage = async (messageId: string) => {
     if (isLoading) return;
 
@@ -479,7 +405,6 @@ export default function App() {
     }
   };
 
-  // 在对话分支间切换
   const handleSwitchBranch = (messageId: string, direction: "prev" | "next") => {
     setSessions(prev => prev.map(session => {
       if (session.id !== activeSessionId) return session;
@@ -551,7 +476,7 @@ export default function App() {
     }));
 
     setInputText("");
-    setAttachments([]); // 发送完毕后清空附件栏
+    setAttachments([]);
     setIsLoading(true);
 
     try {
@@ -623,17 +548,6 @@ export default function App() {
     }
   };
 
-  // 渲染附件卡片图标
-  const renderAttachmentIcon = (type: AttachmentFile['type']) => {
-    switch(type) {
-      case 'image': return <FileImage size={14} className="text-emerald-400" />;
-      case 'audio': return <FileAudio size={14} className="text-purple-400" />;
-      case 'code': return <FileCode size={14} className="text-blue-400" />;
-      case 'office': return <FileSpreadsheet size={14} className="text-orange-400" />;
-      default: return <FileText size={14} className="text-gray-400" />;
-    }
-  };
-
   return (
     <div className="flex h-screen w-screen bg-[#202020] text-[#e3e3e3] overflow-hidden select-none font-sans">
       
@@ -671,116 +585,17 @@ export default function App() {
             </div>
           ) : (
             <div className="max-w-3xl mx-auto space-y-6">
-              {activeSession.messages.map((msg) => {
-                const isUser = msg.sender === 'user';
-                const hasBranches = msg.branches && msg.branches.length > 1;
-                const activeIdx = msg.activeBranchIndex ?? 0;
-                const branchesCount = msg.branches ? msg.branches.length : 0;
-
-                return (
-                  <div key={msg.id} className={`flex gap-4 ${isUser ? 'justify-end' : 'justify-start'}`}>
-                    {!isUser && msg.sender !== 'system_err' && (
-                      <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-amber-600 to-orange-400 flex items-center justify-center text-xs shrink-0 select-none">🤖</div>
-                    )}
-                    
-                    <div 
-                      onContextMenu={(e) => handleMsgContextMenu(e, msg.id, msg.sender)}
-                      style={{ fontSize: chatFontSize }}
-                      className={`max-w-[85%] w-fit p-3.5 rounded-xl leading-relaxed flex flex-col gap-2 cursor-context-menu select-text transition-all duration-150 hover:ring-1 hover:ring-white/5 relative group ${
-                        isUser 
-                          ? 'bg-[#2b6cb0] text-white rounded-tr-none ml-auto' 
-                          : msg.sender === 'system_err'
-                          ? 'bg-[#5c2d2d] text-red-200 border border-[#8c3d3d]'
-                          : 'bg-[#2e2e2e] text-gray-200 border border-[#3a3a3a] rounded-tl-none'
-                      }`}
-                    >
-                      <div className="w-fit max-w-full">
-                        {msg.isEditing ? (
-                          <div className="flex flex-col gap-2 w-[320px] max-w-full">
-                            <textarea
-                              defaultValue={msg.text}
-                              id={`edit-area-${msg.id}`}
-                              className="w-full bg-[#1e1e1e] text-white text-xs border border-[#444] rounded p-2 focus:outline-none focus:border-blue-500 resize-y"
-                              rows={3}
-                            />
-                            <div className="flex justify-end gap-1.5">
-                              <button
-                                onClick={() => {
-                                  const textVal = (document.getElementById(`edit-area-${msg.id}`) as HTMLTextAreaElement)?.value || "";
-                                  handleSaveEdit(msg.id, textVal);
-                                }}
-                                className="px-2 py-1 bg-green-700 hover:bg-green-600 rounded text-[10px] font-medium transition-colors cursor-pointer"
-                              >
-                                保存
-                              </button>
-                              <button
-                                onClick={() => handleCancelEdit(msg.id)}
-                                className="px-2 py-1 bg-gray-600 hover:bg-gray-500 rounded text-[10px] font-medium transition-colors cursor-pointer"
-                              >
-                                取消
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <>
-                            {msg.sender === 'ai' ? (
-                              <MarkdownMessage text={msg.text} fontSize={chatFontSize} />
-                            ) : (
-                              <div className="flex flex-col gap-2">
-                                <p className="whitespace-pre-wrap select-text break-all">{msg.text}</p>
-                                {/* 如果有绑定发送的文件路径，在此显示标签 */}
-                                {msg.filePaths && msg.filePaths.length > 0 && (
-                                  <div className="flex flex-wrap gap-1 mt-1 pt-1.5 border-t border-white/10">
-                                    {msg.filePaths.map((fp, i) => {
-                                      const fn = fp.split(/[/\\]/).pop() || fp;
-                                      return (
-                                        <div key={i} className="flex items-center gap-1 bg-white/10 text-white/95 px-1.5 py-0.5 rounded text-[9px] font-mono select-none">
-                                          {renderAttachmentIcon(getFileType(fn))}
-                                          <span>{fn}</span>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </div>
-
-                      {isUser && hasBranches && !msg.isEditing && (
-                        <div className="mt-1 flex items-center justify-end gap-1.5 text-[10px] text-blue-200/80 font-mono select-none">
-                          <button 
-                            onClick={() => handleSwitchBranch(msg.id, "prev")}
-                            className="p-0.5 hover:bg-white/10 rounded transition-colors cursor-pointer"
-                          >
-                            <ChevronLeft size={10} />
-                          </button>
-                          <span>{`${activeIdx + 1} / ${branchesCount}`}</span>
-                          <button 
-                            onClick={() => handleSwitchBranch(msg.id, "next")}
-                            className="p-0.5 hover:bg-white/10 rounded transition-colors cursor-pointer"
-                          >
-                            <ChevronRight size={10} />
-                          </button>
-                        </div>
-                      )}
-
-                      {msg.sender === 'ai' && !msg.isEditing && (
-                        <div className="mt-1 pt-1.5 border-t border-white/5 flex items-center gap-2 text-[10px] text-gray-500 font-mono select-none">
-                          <span>提供商: <strong className="text-gray-400 font-medium">{msg.provider || "未知"}</strong></span>
-                          <span className="opacity-30">•</span>
-                          <span>模型: <strong className="text-gray-400 font-medium">{msg.model || "未知"}</strong></span>
-                          <span className="opacity-30">•</span>
-                          <span>Token消耗: <strong className="text-gray-400 font-medium">{msg.tokensUsed !== undefined ? msg.tokensUsed : "未知"}</strong></span>
-                          <span className="opacity-30">•</span>
-                          <span>时间: <strong className="text-gray-400 font-medium">{format12HourTime(msg.timestamp)}</strong></span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+              {activeSession.messages.map((msg) => (
+                <MessageItem
+                  key={msg.id}
+                  msg={msg}
+                  chatFontSize={chatFontSize}
+                  onMsgContextMenu={handleMsgContextMenu}
+                  onSaveEdit={handleSaveEdit}
+                  onCancelEdit={handleCancelEdit}
+                  onSwitchBranch={handleSwitchBranch}
+                />
+              ))}
               {isLoading && (
                 <div className="flex gap-4 justify-start">
                   <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-amber-600 to-orange-400 flex items-center justify-center text-xs shrink-0 select-none">🤖</div>
@@ -799,106 +614,20 @@ export default function App() {
         </div>
 
         {/* 底部输入框区 */}
-        <div className="p-6 bg-[#202020] border-t border-[#282828] shrink-0 relative">
-          <div className="max-w-3xl mx-auto bg-[#2e2e2e] rounded-xl border border-[#3e3e3e] shadow-lg flex flex-col px-3 pt-3 pb-2 focus-within:border-[#4d4d4d] transition-all">
-            
-            {/* 附件预览框卡片栏 */}
-            {attachments.length > 0 && (
-              <div className="flex flex-wrap gap-2 px-2 pb-2 border-b border-[#3e3e3e] mb-2 animate-in fade-in duration-100">
-                {attachments.map((file, idx) => (
-                  <div key={idx} className="flex items-center gap-1.5 bg-[#252526] px-2 py-1 rounded-md border border-[#3e3e3e] text-[10px] text-gray-300 font-mono relative group">
-                    {renderAttachmentIcon(file.type)}
-                    <span className="max-w-[120px] truncate">{file.name}</span>
-                    <button 
-                      onClick={() => handleRemoveAttachment(idx)}
-                      className="ml-1 p-0.5 text-gray-500 hover:text-red-400 rounded-full transition-colors cursor-pointer"
-                    >
-                      <X size={10} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <textarea
-              rows={2}
-              placeholder={isLoading ? "请等待当前回复完成..." : "在此处输入聊天内容，点击纸夹按钮选择文件..."}
-              disabled={isLoading}
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSendMessage();
-                }
-              }}
-              className="w-full bg-transparent border-none outline-none resize-none text-xs text-[#e3e3e3] placeholder-gray-500 px-2"
-            />
-
-            <div className="flex items-center justify-between border-t border-[#3a3a3a] pt-2 mt-2">
-              
-              {/* 左侧增加附件按钮 */}
-              <button 
-                onClick={handleSelectFiles}
-                disabled={isLoading}
-                title="选择本地代码、图片或Office文档作为上下文"
-                className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-[#3a3a3a] transition-all cursor-pointer"
-              >
-                <Paperclip size={14} />
-              </button>
-
-              {/* 右侧发送及模型下拉选择器 */}
-              <div className="flex items-center gap-2 relative">
-                <div className="relative">
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); setShowModelDropdown(!showModelDropdown); }}
-                    className="text-[10px] text-gray-400 hover:text-white font-semibold bg-[#202020] px-2.5 py-1.5 rounded border border-[#353535] flex items-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <span className={`w-1.5 h-1.5 rounded-full ${
-                      selectedModel.includes("pro") 
-                        ? "bg-amber-500 animate-pulse" 
-                        : selectedModel.includes("deepseek") 
-                        ? "bg-[#f97316]" 
-                        : "bg-emerald-400 animate-pulse"
-                    }`}></span>
-                    {selectedModel}
-                    <ChevronUp size={10} className={`transform transition-transform ${showModelDropdown ? 'rotate-180' : ''}`} />
-                  </button>
-
-                  {showModelDropdown && (
-                    <div className="absolute bottom-full right-0 mb-2 w-48 max-h-60 overflow-y-auto scrollbar-thin bg-[#252526] border border-[#3e3e3e] rounded-lg shadow-xl py-1 z-50">
-                      {availableModels.map((modelName) => (
-                        <button
-                          key={modelName}
-                          onClick={() => { setSelectedModel(modelName); setShowModelDropdown(false); }}
-                          className={`w-full text-left px-3 py-2 text-xs hover:bg-[#333] transition-colors flex flex-col cursor-pointer ${
-                            selectedModel === modelName ? "text-amber-400 font-semibold" : "text-gray-300"
-                          }`}
-                        >
-                          <span>{modelName}</span>
-                          <span className="text-[9px] text-gray-500 font-normal">
-                            {modelName.includes("deepseek") ? "云端部署模型" : "Ollama 本地模型"}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <button 
-                  onClick={handleSendMessage}
-                  disabled={(!inputText.trim() && attachments.length === 0) || isLoading}
-                  className={`w-7 h-7 rounded-full flex items-center justify-center transition-all cursor-pointer ${
-                    (inputText.trim() || attachments.length > 0) && !isLoading ? 'bg-white text-black hover:bg-gray-200' : 'bg-[#3e3e3e] text-gray-500 cursor-not-allowed'
-                  }`}
-                >
-                  <Send size={12} />
-                </button>
-              </div>
-            </div>
-          </div>
-          <div className="text-center text-[10px] text-gray-500 mt-2">AI 的回答可能有误，请检查重要信息</div>
-        </div>
+        <ChatInput
+          inputText={inputText}
+          setInputText={setInputText}
+          isLoading={isLoading}
+          attachments={attachments}
+          selectedModel={selectedModel}
+          availableModels={availableModels}
+          showModelDropdown={showModelDropdown}
+          setShowModelDropdown={setShowModelDropdown}
+          setSelectedModel={setSelectedModel}
+          onSelectFiles={handleSelectFiles}
+          onRemoveAttachment={handleRemoveAttachment}
+          onSendMessage={handleSendMessage}
+        />
 
       </div>
 

@@ -36,8 +36,12 @@ tangerine/
 │   ├── components/                # [组件目录]
 │   │   ├── CodeBlock.tsx          # 可复制代码块：支持传入 fontSize 参数，微调代码文字大小以自适应全局对话字号设置
 │   │   ├── MarkdownMessage.tsx    # Markdown 解析器：接收外部 fontSize，动态自适应行内代码、表格及多级标题比例，进行 Fluent 风格渲染
+│   │   ├── MessageItem.tsx        # [新解耦] 消息渲染组件：专门管理单条消息的气泡呈现、编辑模式、分支切换、文件附件显示
+│   │   ├── ChatInput.tsx          # [新解耦] 底部输入组件：包含附件预览栏、输入框、添加附件按钮、混合模型下拉选择器
 │   │   ├── Sidebar.tsx            # 侧边栏：管理聊天历史切换、右键菜单、新建会话以及跳转“设置”
 │   │   └── SettingsModal.tsx      # [已修改] 设置面板：重构为多 Tab 导航（“云端模型设置”、“本地模型设置”和“对话格式设置”）。支持本地 Ollama 状态一键检测、本地模型一键同步检索，并在本地模型设置底部支持专属 Ollama 管理，完全避免与云端 API 产生配置挤占与物理顶替。
+│   ├── types/                     # [类型目录]
+│   │   └── chat.ts                # [新解耦] 类型声明文件：承载 Session、Message、Attachment 类型定义与文件类型/时间处理辅助函数
 │   ├── App.tsx                    # [已修改] 主界面组件：作为核心控制器，新增全局字号监听与分发、双系统右键删除菜单、API Token 多路径捕获。支持动态拉取加载本地与云端的混合模型列表，对非 DeepSeek（如本地 Ollama 导入）的模型进行智能多通路请求路由，且支持 3 秒 Fluent 质感警示弹窗与严密的 [用户-AI] 交替守卫。
 │   ├── index.css                  # Tailwind v4 规范升级：引入 @import "tailwindcss" 并声明 @source 自定义扫描源
 │   ├── main.tsx                   # 前端入口文件：引入 React、App 组件并加载 index.css、highlight.js/styles/atom-one-dark.css
@@ -57,54 +61,30 @@ tangerine/
 ├── postcss.config.js              # PostCSS 配置文件，激活 @tailwindcss/postcss
 ├── tailwind.config.js             # Tailwind CSS 模版路径扫描配置（作为 v3 兼容层备用，主要以 index.css 的 @source 为编译基准）
 └── README.md                      # 项目说明文档
-```
 
 --------------------------------------------------------------------------------------------------------------------------------
 
-#### 三、 项目环境依赖与多电脑协同开发
+三、 项目环境依赖与多电脑协同开发
 为了能在不同的电脑上通过 GitHub 克隆代码后快速恢复开发，请确保目标电脑满足以下环境：
 
-**1. 全局系统环境要求**
-- Node.js：建议安装 v18.x 或 v20.x LTS 版本。
-- pnpm：推荐使用的前端包管理器。
-- Rust 编译链：安装 Rustup，且 Windows 电脑需要 C++ 生成工具（VS C++ 桌面开发工作负载）。
-- Python 3：确保 python 已添加到系统环境变量 PATH 中。
-- 环境变量：系统中建议保留 `DEEPSEEK_API_KEY` 作为云端首选秘钥（后续可通过设置面板自定义配置）。
-- 本地服务（可选）：若要启用离线 AI，建议安装本地 Ollama 并拉取相应模型（如 `qwen2.5` 等）。
+1. 全局系统环境要求
 
-**2. 跨电脑克隆后的快速启动步骤**
+Node.js：建议安装 v18.x 或 v20.x LTS 版本。
+pnpm：推荐使用的前端包管理器。
+Rust 编译链：安装 Rustup，且 Windows 电脑需要 C++ 生成工具（VS C++ 桌面开发工作负载）。
+Python 3：确保 python 已添加到系统环境变量 PATH 中。
+环境变量：系统中建议保留 DEEPSEEK_API_KEY 作为云端首选秘钥（后续可通过设置面板自定义配置）。
+本地服务（可选）：若要启用离线 AI，建议安装本地 Ollama 并拉取相应模型（如 qwen2.5 等）。
+2. 跨电脑克隆后的快速启动步骤
 在新电脑上克隆仓库后，只需在项目根目录下依次执行以下命令：
 
-- **步骤 A**：安装前端依赖
-  `pnpm install`
+步骤 A：安装前端依赖
+pnpm install
 
-- **步骤 B**：安装 Python Sidecar 依赖
-  `pip install -r src-tauri/py_sidecar/requirements.txt`
+步骤 B：安装 Python Sidecar 依赖
+pip install -r src-tauri/py_sidecar/requirements.txt
 
-- **步骤 C**：清理缓存并一键启动开发预览
-  如遇到样式未能实时加载等现象，建议清理 Vite 缓存：
-  PowerShell: `Remove-Item -Recurse -Force .vite`
-  启动开发服务：`pnpm tauri dev`
-
---------------------------------------------------------------------------------------------------------------------------------
-
-#### 四、 核心逻辑
-**LocalStorage 多轨持久化 & 动态事件通信**：
-- 聊天历史：持久化在 LocalStorage 的 `"tangerine_chat_sessions"` 中。
-- 多 API 配置（混合配置）：持久化在 LocalStorage 的 `"tangerine_api_settings"` 中。在本地模型设置页面运行自动检索时，Ollama 模型的元数据会作为一个独立的提供商模块存入并更新该配置。
-- 动态配置更新事件：设置页面更新 API 后，通过分发自定义事件 `tangerine_api_settings_changed`，可被主页面 App 动态监听捕获，从而实现主页面右下角可用模型下拉列表的**无刷新实时刷新与同步**。
-- 对话框字号：持久化在 LocalStorage 的 `"tangerine_font_size"` 中（默认 12px，跨组件订阅 `"storage_font_size_changed"` 事件实时同步更新）。
-
-**本地与云端配置完全解耦隔离**：
-- 云端模型设置（原“模型 API 设置”）过滤掉 `"ollama"`，仅渲染和更改外部大语言模型。
-- 本地模型设置不仅可以进行本地 Ollama 的心跳和模型拉取，而且在其底部整合了专属于 Ollama 路径与可调用模型名管理的高级面板。通过该架构隔离，杜绝了导入本地模型时顶替、抢占原有云端 API 配置行的配置冲突 Bug。
-
-**网络流智能分流**：
-- 在调用统一请求路由 `/chat` 时，Python 后端会根据客户端请求的 `model` 名字进行检索：若包含 `"deepseek"` 特征字则走向官方 OpenAI 客户端通道；否则走向本地 Ollama 的 `v1/chat/completions` 通道进行非流式推理。
-
-**气泡级右键删除机制**：
-- 支持右键点击聊天气泡删除单条信息，删除后该消息将在会话数组中物理移除，确保在后续新发送请求时，完全不计入发送给 API 的上下文。
-
-**API 异常防御与对话守卫**：
-- 对话交替校验：发送新问题或在旧消息节点启用分支发送时，系统会严格过滤系统报错并核对剩余消息顺序。如果不满足 `[User, AI, User, AI]` 交替对应的逻辑结构，发送动作会被拦截，并弹出一个 3 秒后自动淡出的警示浮窗。
-- Token 深度捕获：升级了多路径冗余捕获算法，彻底兼容各大云端提供商及本地 Fast API 转发中 `usage.total_tokens`、`usage_metadata`、`total_tokens` 等各种格式的 Token 字段解析，保障元数据完整呈现。
+步骤 C：清理缓存并一键启动开发预览
+如遇到样式未能实时加载等现象，建议清理 Vite 缓存：
+PowerShell: Remove-Item -Recurse -Force .vite
+启动开发服务：pnpm tauri dev
