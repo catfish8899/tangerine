@@ -3,12 +3,6 @@ import { useState, useRef, useEffect } from "react";
 import { 
   Send, 
   ChevronUp,
-  PlusCircle,
-  Hammer,
-  Keyboard,
-  Globe,
-  FileText,
-  Sliders,
   Loader,
   Trash2,
   AlertTriangle,
@@ -758,15 +752,8 @@ export default function App() {
               className="w-full bg-transparent border-none outline-none resize-none text-xs text-[#e3e3e3] placeholder-gray-500 px-2"
             />
 
-            <div className="flex items-center justify-between border-t border-[#3a3a3a] pt-2 mt-2">
-              <div className="flex items-center gap-1.5 text-gray-400">
-                <button className="p-1.5 hover:bg-[#383838] hover:text-white rounded transition-colors"><PlusCircle size={14} /></button>
-                <button className="p-1.5 hover:bg-[#383838] hover:text-white rounded transition-colors"><Hammer size={14} /></button>
-                <button className="p-1.5 hover:bg-[#383838] hover:text-white rounded transition-colors"><Keyboard size={14} /></button>
-                <button className="p-1.5 hover:bg-[#383838] hover:text-white rounded transition-colors"><Globe size={14} /></button>
-                <button className="p-1.5 hover:bg-[#383838] hover:text-white rounded transition-colors"><FileText size={14} /></button>
-                <button className="p-1.5 hover:bg-[#383838] hover:text-white rounded transition-colors"><Sliders size={14} /></button>
-              </div>
+            {/* 调整 flex 为 justify-end，并移除了原有的无功能图标列表 */}
+            <div className="flex items-center justify-end border-t border-[#3a3a3a] pt-2 mt-2">
 
               {/* 右侧发送及模型下拉选择器 */}
               <div className="flex items-center gap-2 relative">

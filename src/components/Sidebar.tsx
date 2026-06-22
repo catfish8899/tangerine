@@ -1,7 +1,5 @@
 // src/components/Sidebar.tsx 的完整修改版
 import { 
-  Search, 
-  SlidersHorizontal, 
   Plus, 
   Image as ImageIcon, 
   UserSquare2, 
@@ -42,12 +40,9 @@ export default function Sidebar({
   return (
     <div className="w-[260px] bg-[#181818] flex flex-col border-r border-[#2d2d2d] shrink-0 justify-between">
       <div className="flex flex-col pt-4 px-3 overflow-hidden">
+        {/* 顶部标题区（已移除右上角的放大镜和设置/过滤图标） */}
         <div className="flex items-center justify-between px-2 mb-4 shrink-0">
           <span className="text-xs text-gray-400 font-semibold tracking-wider">聊天</span>
-          <div className="flex gap-3 text-gray-400">
-            <Search size={15} className="hover:text-white cursor-pointer" />
-            <SlidersHorizontal size={15} className="hover:text-white cursor-pointer" />
-          </div>
         </div>
 
         {/* 会话列表 */}
