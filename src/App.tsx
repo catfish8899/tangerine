@@ -667,7 +667,7 @@ export default function App() {
               <div className="w-12 h-12 rounded-xl bg-[#2e2e2e] flex items-center justify-center mb-4 border border-[#3e3e3e]">
                 <span className="text-2xl">💬</span>
               </div>
-              <h2 className="text-base font-semibold text-white tracking-wide">等待用户输入...📓封装多模态与文档解析✍️🧐</h2>
+              <h2 className="text-base font-semibold text-white tracking-wide">等待用户输入...📓✍️🧐</h2>
             </div>
           ) : (
             <div className="max-w-3xl mx-auto space-y-6">
