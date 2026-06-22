@@ -3,6 +3,8 @@ import os
 import sys
 import uvicorn
 import httpx
+import base64
+import mimetypes
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -27,6 +29,141 @@ OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 class ChatRequest(BaseModel):
     model: str  # 模型名称，例如 deepseek-v4-flash, qwen2:7b 等
     messages: list
+    file_paths: Optional[List[str]] = []  # 接收绑定的本地绝对路径列表
+
+# ================= 辅助函数：根据路径转换/解析多模态与Office、代码文件 =================
+
+def process_file_paths(file_paths: List[str]) -> tuple:
+    """
+    解析传入的本地文件：
+    1. 图片和音频转为原生多模态(通过返回对应的原生格式)
+    2. 代码文件直接由 Python 本地读取
+    3. Office 文件(.docx, .xlsx, .pptx, .pdf) 调用最新 LlamaCloud SDK 转换为 Markdown
+    返回: (文本上下文拼接字符串, 原生多模态列表)
+    """
+    text_context = ""
+    multimodal_contents = []
+
+    # 兼容获取最新的 Llama Cloud Key，优先捕获系统环境变量
+    llama_cloud_key = os.environ.get("LLAMA_CLOUD_API_KEY") or os.environ.get("LLAMAPARSE_API_KEY")
+
+    for path in file_paths:
+        if not os.path.exists(path):
+            continue
+
+        filename = os.path.basename(path)
+        ext = os.path.splitext(path)[1].lower()
+
+        # 1. 原生多模态处理（图片和音频）
+        if ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.mp3', '.wav', '.ogg', '.m4a']:
+            try:
+                mime_type, _ = mimetypes.guess_type(path)
+                if not mime_type:
+                    mime_type = "image/png" if ext in ['.png', '.jpg', '.jpeg'] else "audio/mp3"
+                
+                with open(path, "rb") as f:
+                    file_b64 = base64.b64encode(f.read()).decode("utf-8")
+                
+                if ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']:
+                    multimodal_contents.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{mime_type};base64,{file_b64}"
+                        }
+                    })
+                else:
+                    # 音频文件数据类型
+                    multimodal_contents.append({
+                        "type": "input_audio",
+                        "input_audio": {
+                            "data": file_b64,
+                            "format": ext.replace('.', '')
+                        }
+                    })
+            except Exception as e:
+                text_context += f"\n\n[读取多模态文件出错 {filename}: {str(e)}]\n\n"
+
+        # 2. Office类文件：调用最新的 LlamaCloud SDK 进行转换
+        elif ext in ['.pdf', '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', '.rtf', '.epub', '.mobi']:
+            if not llama_cloud_key:
+                text_context += f"\n\n[警告：检测到 Office 文件 {filename}，但未配置系统环境变量 LLAMA_CLOUD_API_KEY，无法解析。]\n\n"
+                continue
+            try:
+                # 动态导入最新版统一 SDK
+                from llama_cloud import LlamaCloud
+                
+                # 初始化客户端，手动传入读取到的密钥，避免环境变量命名不一致问题
+                client = LlamaCloud(api_key=llama_cloud_key)
+                
+                # 创建上传任务，指定用途为解析
+                with open(path, "rb") as f:
+                    uploaded_file = client.files.create(file=f, purpose="parse")
+                
+                # 启动解析，设置 tier 为 agentic (高表现力智能版)
+                # 移除不支持的 'language' 关键字参数，让云端自适应最强大的多语言混合 OCR 纠错
+                result = client.parsing.parse(
+                    file_id=uploaded_file.id,
+                    tier="agentic",
+                    version="latest",
+                    expand=["markdown"]
+                )
+                
+                # 从解析结果的每一页中提取 Markdown 文本并合并
+                pages_markdown = []
+                if result.markdown and hasattr(result.markdown, "pages"):
+                    for page in result.markdown.pages:
+                        pages_markdown.append(page.markdown)
+                
+                parsed_md = "\n\n".join(pages_markdown)
+                text_context += f"\n\n[以下是 Office 文件 `{filename}` 的解析内容]\n---\n{parsed_md}\n---\n"
+            except Exception as e:
+                text_context += f"\n\n[LlamaCloud 解析 Office 文件 {filename} 失败: {str(e)}]\n\n"
+
+        # 3. 其他文件默认为文本或代码文件：直接本地纯文本读取
+        else:
+            try:
+                with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read()
+                lang = ext.replace('.', '') if ext else 'text'
+                text_context += f"\n\n[已加载代码/文本文件: `{filename}`]\n```{lang}\n{content}\n```\n"
+            except Exception as e:
+                text_context += f"\n\n[读取文件 {filename} 失败: {str(e)}]\n\n"
+
+    return text_context.strip(), multimodal_contents
+
+# ================= 新增：Python 底层 Tkinter 极简原生文件选择对话框 =================
+
+@app.post("/api/select-files")
+async def select_files():
+    """
+    拉起 Windows 原生文件选择对话框（支持多选）
+    """
+    import tkinter as tk
+    from tkinter import filedialog
+    
+    # 初始化一个隐藏的 tk 实例，只用来调起文件对话框
+    root = tk.Tk()
+    root.withdraw()
+    # 保持置顶，避免弹窗被主界面盖住
+    root.attributes('-topmost', True)
+    
+    # 弹出原生多文件选择对话框
+    files = filedialog.askopenfilenames(
+        title="选择对话附件",
+        filetypes=[
+            ("所有文件", "*.*"),
+            ("文档/Office", "*.pdf;*.docx;*.doc;*.xlsx;*.xls;*.pptx;*.ppt;*.txt"),
+            ("图片文件", "*.jpg;*.jpeg;*.png;*.gif;*.webp;*.bmp"),
+            ("音频文件", "*.mp3;*.wav;*.ogg;*.m4a"),
+            ("代码文件", "*.py;*.js;*.ts;*.tsx;*.rs;*.go;*.cpp;*.c;*.html;*.css;*.json;*.yaml")
+        ]
+    )
+    
+    root.destroy() # 彻底销毁 tk 实例以释放内存
+    
+    if files:
+        return {"status": "success", "files": list(files)}
+    return {"status": "success", "files": []}
 
 # ================= 新增：Ollama 检测服务 =================
 
@@ -37,7 +174,6 @@ async def get_ollama_status():
     """
     async with httpx.AsyncClient() as client:
         try:
-            # 访问 Ollama 根路径，如果运行中通常会返回 "Ollama is running"
             response = await client.get(OLLAMA_BASE_URL, timeout=2.0)
             if response.status_code == 200:
                 return {"status": "online", "message": "Ollama 服务在线"}
@@ -59,7 +195,6 @@ async def get_ollama_tags():
             response = await client.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=3.0)
             if response.status_code == 200:
                 data = response.json()
-                # 提取模型名称列表
                 models = [model["name"] for model in data.get("models", [])]
                 return {"status": "success", "models": models}
             else:
@@ -74,6 +209,32 @@ async def chat(request: ChatRequest):
     # 根据模型名称判断是否走 DeepSeek 官方
     is_deepseek_model = "deepseek" in request.model.lower()
 
+    # 处理输入文件
+    text_context, multimodal_contents = process_file_paths(request.file_paths)
+
+    # 准备标准的对话上下文
+    processed_messages = []
+    
+    for i, msg in enumerate(request.messages):
+        if i == len(request.messages) - 1 and msg["role"] == "user":
+            user_text = msg["content"]
+            if text_context:
+                user_text = f"{text_context}\n\n请结合以上文档/代码内容，回答用户的问题：{user_text}"
+            
+            if multimodal_contents:
+                content_payload = [{"type": "text", "text": user_text}] + multimodal_contents
+                processed_messages.append({
+                    "role": "user",
+                    "content": content_payload
+                })
+            else:
+                processed_messages.append({
+                    "role": "user",
+                    "content": user_text
+                })
+        else:
+            processed_messages.append(msg)
+
     if is_deepseek_model:
         # ---- DeepSeek 官方 API 逻辑 ----
         if not api_key:
@@ -85,23 +246,18 @@ async def chat(request: ChatRequest):
                 base_url="https://api.deepseek.com"
             )
             
-            # 准备请求参数
             kwargs = {
                 "model": request.model,
-                "messages": request.messages,
+                "messages": processed_messages,
             }
 
-            # 如果调用的是 pro 豪华版，添加深度思考参数
             if request.model == "deepseek-v4-pro":
                 kwargs["reasoning_effort"] = "high"
                 kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
 
             response = client.chat.completions.create(**kwargs)
-            
-            # 返回 AI 的文本
             ai_content = response.choices[0].message.content
             
-            # 提取并透传 Token 消耗信息给 React 前端
             usage_info = None
             if hasattr(response, "usage") and response.usage is not None:
                 if hasattr(response.usage, "model_dump"):
@@ -124,19 +280,18 @@ async def chat(request: ChatRequest):
         # ---- Ollama 本地模型 API 逻辑 ----
         async with httpx.AsyncClient() as client:
             try:
-                # 转发给本地 Ollama 服务兼容 OpenAI 的对话接口
                 headers = {"Content-Type": "application/json"}
                 payload = {
                     "model": request.model,
-                    "messages": request.messages,
-                    "stream": False # 此处采用非流式处理
+                    "messages": processed_messages,
+                    "stream": False
                 }
                 
                 response = await client.post(
                     f"{OLLAMA_BASE_URL}/v1/chat/completions",
                     headers=headers,
                     json=payload,
-                    timeout=180.0 # 本地推理可能较慢，给予更充裕的超时阈值
+                    timeout=180.0
                 )
                 
                 if response.status_code == 200:
@@ -153,5 +308,4 @@ async def chat(request: ChatRequest):
                 raise HTTPException(status_code=500, detail=f"Ollama 本地推理失败: {str(e)}")
 
 if __name__ == "__main__":
-    # 绑定在本地 127.0.0.1:5678 端口上
     uvicorn.run(app, host="127.0.0.1", port=5678)

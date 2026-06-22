@@ -9,7 +9,14 @@ import {
   Edit3,
   ChevronLeft,
   ChevronRight,
-  RefreshCw
+  RefreshCw,
+  Paperclip,
+  X,
+  FileCode,
+  FileText,
+  FileAudio,
+  FileSpreadsheet,
+  FileImage
 } from "lucide-react";
 import Sidebar from "./components/Sidebar";
 import MarkdownMessage from "./components/MarkdownMessage";
@@ -23,8 +30,9 @@ interface Message {
   model?: string;
   tokensUsed?: number;
   timestamp?: number;
+  filePaths?: string[]; // 记录本次消息关联的文件绝对路径列表
   
-  // 👇 新增编辑和分支管理字段
+  // 👇 编辑和分支管理字段
   isEditing?: boolean;
   activeBranchIndex?: number;
   branches?: Message[][]; // 存储该用户消息发起的分支（每个分支包含该节点之后的所有后续消息数组）
@@ -36,9 +44,25 @@ interface ChatSession {
   messages: Message[];
 }
 
+interface AttachmentFile {
+  name: string;
+  path: string;
+  type: 'image' | 'audio' | 'code' | 'office' | 'other';
+}
+
 const STORAGE_KEY = "tangerine_chat_sessions";
 const FONT_SIZE_STORAGE_KEY = "tangerine_font_size";
 const SETTINGS_STORAGE_KEY = "tangerine_api_settings";
+
+// 辅助函数：根据文件名推断附件卡片展示类型
+function getFileType(fileName: string): 'image' | 'audio' | 'code' | 'office' | 'other' {
+  const ext = fileName.split('.').pop()?.toLowerCase() || '';
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext)) return 'image';
+  if (['mp3', 'wav', 'ogg', 'm4a'].includes(ext)) return 'audio';
+  if (['py', 'js', 'ts', 'tsx', 'jsx', 'rs', 'go', 'cpp', 'c', 'html', 'css', 'json', 'yaml', 'sh'].includes(ext)) return 'code';
+  if (['docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'pdf', 'rtf', 'epub', 'mobi'].includes(ext)) return 'office';
+  return 'other';
+}
 
 // 辅助函数：将时间戳格式化为 12 小时制
 function format12HourTime(timestamp?: number): string {
@@ -72,6 +96,9 @@ export default function App() {
   
   const [inputText, setInputText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+
+  // 附件管理状态
+  const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
 
   // 👇 动态状态：替代写死联合类型的 selectedModel 与 availableModels
   const [selectedModel, setSelectedModel] = useState<string>("deepseek-v4-flash");
@@ -121,11 +148,9 @@ export default function App() {
     if (savedConfigs) {
       try {
         const parsed: ApiProviderConfig[] = JSON.parse(savedConfigs);
-        // 汇集所有的模型
         const allModels = parsed.flatMap(cfg => cfg.models);
         if (allModels.length > 0) {
           setAvailableModels(allModels);
-          // 如果旧的选中模型不再存在，则重置为第一项
           if (!allModels.includes(selectedModel)) {
             setSelectedModel(allModels[0]);
           }
@@ -135,24 +160,22 @@ export default function App() {
         console.error("加载模型列表失败：", e);
       }
     }
-    // 默认备用项
     setAvailableModels(["deepseek-v4-flash", "deepseek-v4-pro"]);
   };
 
   // 监听全局点击、键盘 ESC 按键、字号及模型配置修改
   useEffect(() => {
-    // 页面初始化同步一次模型
     syncModelsFromSettings();
 
     const handleGlobalClick = () => {
       setContextMenu(prev => ({ ...prev, visible: false }));
-      setMsgContextMenu(prev => ({ ...prev, visible: false })); // 全局点击关闭消息气泡右键菜单
+      setMsgContextMenu(prev => ({ ...prev, visible: false }));
       setShowModelDropdown(false);
     };
     
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setShowSettings(false); // 按 ESC 键关闭设置窗口
+        setShowSettings(false);
       }
     };
 
@@ -161,7 +184,6 @@ export default function App() {
       setChatFontSize(size);
     };
 
-    // 监听本地配置变化，随时刷新模型列表
     const handleSettingsChange = () => {
       syncModelsFromSettings();
     };
@@ -182,7 +204,6 @@ export default function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  // 只有当加载状态改变或者消息数量真正变多时才触发平滑滚动，而编辑消息状态更新时不滚动
   useEffect(() => {
     const currentCount = activeSession?.messages?.length || 0;
     if (currentCount > prevMessagesCountRef.current || isLoading) {
@@ -202,7 +223,6 @@ export default function App() {
     });
   };
 
-  // 呼出对话气泡删除菜单的回调（记录 sender 以区分是否可以发送分支）
   const handleMsgContextMenu = (e: React.MouseEvent, messageId: string, sender: "user" | "ai" | "system_err") => {
     e.preventDefault();
     e.stopPropagation();
@@ -229,7 +249,6 @@ export default function App() {
     }
   };
 
-  // 物理删除单个消息气泡，直接从 messages 过滤，确保之后发送不计入上下文
   const handleDeleteMessage = (messageId: string) => {
     setSessions(prev => prev.map(session => {
       if (session.id === activeSessionId) {
@@ -248,7 +267,6 @@ export default function App() {
     setActiveSessionId(newId);
   };
 
-  // 严格守卫校验：过滤系统错误后，消息列表必须完美呈现 [user, ai, user, ai ...] 的交替结构
   const validateAlternatingOrder = (tempMessagesList: Message[]): boolean => {
     const chatOnly = tempMessagesList.filter(m => m.sender !== "system_err");
     if (chatOnly.length === 0) return true;
@@ -261,7 +279,6 @@ export default function App() {
     return true;
   };
 
-  // 气泡编辑功能支持
   const handleStartEdit = (messageId: string) => {
     setSessions(prev => prev.map(session => {
       if (session.id === activeSessionId) {
@@ -298,6 +315,35 @@ export default function App() {
     }));
   };
 
+  // 👇 修改：通过 Python Sidecar 接口拉起 Windows 原生文件选择对话框，前端免依赖
+  const handleSelectFiles = async () => {
+    try {
+      const response = await fetch("http://127.0.0.1:5678/api/select-files", {
+        method: "POST"
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.status === "success" && data.files) {
+          const newAttachments: AttachmentFile[] = data.files.map((filePath: string) => {
+            const name = filePath.split(/[/\\]/).pop() || filePath;
+            return {
+              name,
+              path: filePath,
+              type: getFileType(name)
+            };
+          });
+          setAttachments(prev => [...prev, ...newAttachments]);
+        }
+      }
+    } catch (err) {
+      console.error("通过 Python 选取文件失败:", err);
+    }
+  };
+
+  const handleRemoveAttachment = (idx: number) => {
+    setAttachments(prev => prev.filter((_, i) => i !== idx));
+  };
+
   // 在此用户消息上开启分支并发送消息
   const handleResendMessage = async (messageId: string) => {
     if (isLoading) return;
@@ -312,27 +358,22 @@ export default function App() {
     const precedingMessages = session.messages.slice(0, msgIdx + 1);
     const subsequentMessages = session.messages.slice(msgIdx + 1);
 
-    // 拼装临时发送列表进行严格验证
     if (!validateAlternatingOrder(precedingMessages)) {
       setWarningMessage("⚠️ 对话未遵循 ai--用户 顺序结构，请删除对应气泡后再发送。");
       setTimeout(() => setWarningMessage(null), 3000);
       return;
     }
 
-    // 初始化或归档当前分支下的后续消息
     let branches = targetMsg.branches ? [...targetMsg.branches] : [];
     let activeBranchIndex = targetMsg.activeBranchIndex ?? 0;
 
     if (branches.length === 0) {
-      // 第一次分叉，将现有的后续消息归档为分支 1
       branches = [subsequentMessages];
       activeBranchIndex = 0;
     } else {
-      // 保存正在浏览的分支的后续消息
       branches[activeBranchIndex] = subsequentMessages;
     }
 
-    // 新增分支 (分支索引自动 +1)，初始为空
     branches.push([]);
     activeBranchIndex = branches.length - 1;
 
@@ -358,12 +399,15 @@ export default function App() {
           content: m.text
         }));
 
+      const filePathsToSend = targetMsg.filePaths || [];
+
       const response = await fetch("http://127.0.0.1:5678/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: selectedModel,
-          messages: [{ role: "system", content: "You are a helpful assistant" }, ...apiMessages]
+          messages: [{ role: "system", content: "You are a helpful assistant" }, ...apiMessages],
+          file_paths: filePathsToSend
         })
       });
 
@@ -449,11 +493,9 @@ export default function App() {
 
       if (branches.length <= 1) return session;
 
-      // 归档当前处于显示状态的后续消息
       const subsequentMessages = session.messages.slice(idx + 1);
       branches[activeBranchIndex] = subsequentMessages;
 
-      // 循环计算新的激活分支索引
       let newIndex = activeBranchIndex;
       if (direction === "prev") {
         newIndex = activeBranchIndex === 0 ? branches.length - 1 : activeBranchIndex - 1;
@@ -464,7 +506,6 @@ export default function App() {
       targetMsg.branches = branches;
       targetMsg.activeBranchIndex = newIndex;
 
-      // 组装并拼接后续分支的消息列表
       const nextMessages = [...session.messages.slice(0, idx), targetMsg, ...branches[newIndex]];
 
       return {
@@ -475,34 +516,34 @@ export default function App() {
   };
 
   const handleSendMessage = async () => {
-    if (!inputText.trim() || isLoading) return;
+    if (!inputText.trim() && attachments.length === 0 || isLoading) return;
 
     const userText = inputText;
+    const filePathsToSend = attachments.map(a => a.path);
+
     const userMessage: Message = { 
       id: Date.now().toString(), 
       sender: "user", 
       text: userText,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      filePaths: filePathsToSend
     };
 
-    // 拼装用于校验的新临时列表 (排除系统错误，新追加的消息必须和旧消息形成严密的 user-ai 交替关系)
     const proposedMessages = [...activeSession.messages, userMessage];
 
-    // 👇 校验：如果不满足交替顺序
     if (!validateAlternatingOrder(proposedMessages)) {
       setWarningMessage("⚠️ 对话未遵循 ai--用户 顺序结构，请删除对应气泡后再发送。");
       setTimeout(() => {
         setWarningMessage(null);
-      }, 3000); // 持续 3 秒警示
+      }, 3000);
       return;
     }
 
     let currentMessages = [...activeSession.messages, userMessage];
-    
     setSessions(prev => prev.map(session => {
       if (session.id === activeSessionId) {
         const title = session.messages.length === 0 
-          ? (userText.length > 12 ? userText.slice(0, 12) + "..." : userText)
+          ? (userText.length > 12 ? userText.slice(0, 12) + "..." : userText || "包含文件的会话")
           : session.title;
         return { ...session, title, messages: currentMessages };
       }
@@ -510,6 +551,7 @@ export default function App() {
     }));
 
     setInputText("");
+    setAttachments([]); // 发送完毕后清空附件栏
     setIsLoading(true);
 
     try {
@@ -525,7 +567,8 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: selectedModel,
-          messages: [{ role: "system", content: "You are a helpful assistant" }, ...apiMessages]
+          messages: [{ role: "system", content: "You are a helpful assistant" }, ...apiMessages],
+          file_paths: filePathsToSend
         })
       });
 
@@ -536,7 +579,6 @@ export default function App() {
 
       const data = await response.json();
       
-      // 👇 升级 Token 捕获机制：全方位覆盖各种可能的 Python 返回格式，绝不漏掉 usage 信息
       const tokensUsed = 
         data.usage?.total_tokens ?? 
         data.usage?.total_token ?? 
@@ -581,6 +623,17 @@ export default function App() {
     }
   };
 
+  // 渲染附件卡片图标
+  const renderAttachmentIcon = (type: AttachmentFile['type']) => {
+    switch(type) {
+      case 'image': return <FileImage size={14} className="text-emerald-400" />;
+      case 'audio': return <FileAudio size={14} className="text-purple-400" />;
+      case 'code': return <FileCode size={14} className="text-blue-400" />;
+      case 'office': return <FileSpreadsheet size={14} className="text-orange-400" />;
+      default: return <FileText size={14} className="text-gray-400" />;
+    }
+  };
+
   return (
     <div className="flex h-screen w-screen bg-[#202020] text-[#e3e3e3] overflow-hidden select-none font-sans">
       
@@ -614,7 +667,7 @@ export default function App() {
               <div className="w-12 h-12 rounded-xl bg-[#2e2e2e] flex items-center justify-center mb-4 border border-[#3e3e3e]">
                 <span className="text-2xl">💬</span>
               </div>
-              <h2 className="text-base font-semibold text-white tracking-wide">等待用户输入...📓✍️🧐</h2>
+              <h2 className="text-base font-semibold text-white tracking-wide">等待用户输入...📓封装多模态与文档解析✍️🧐</h2>
             </div>
           ) : (
             <div className="max-w-3xl mx-auto space-y-6">
@@ -630,7 +683,6 @@ export default function App() {
                       <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-amber-600 to-orange-400 flex items-center justify-center text-xs shrink-0 select-none">🤖</div>
                     )}
                     
-                    {/* 应用动态字号，并绑定 `onContextMenu` 支持气泡右键自定义菜单。此处增加了 w-fit 限制 */}
                     <div 
                       onContextMenu={(e) => handleMsgContextMenu(e, msg.id, msg.sender)}
                       style={{ fontSize: chatFontSize }}
@@ -642,10 +694,8 @@ export default function App() {
                           : 'bg-[#2e2e2e] text-gray-200 border border-[#3a3a3a] rounded-tl-none'
                       }`}
                     >
-                      {/* 将 flex-1 撑满外层的盒子，替换为 w-fit 以紧密包裹，且对 editing 框的宽度设定了保障 */}
                       <div className="w-fit max-w-full">
                         {msg.isEditing ? (
-                          // 👇 编辑输入框模式
                           <div className="flex flex-col gap-2 w-[320px] max-w-full">
                             <textarea
                               defaultValue={msg.text}
@@ -672,12 +722,27 @@ export default function App() {
                             </div>
                           </div>
                         ) : (
-                          // 👇 正常渲染模式
                           <>
                             {msg.sender === 'ai' ? (
                               <MarkdownMessage text={msg.text} fontSize={chatFontSize} />
                             ) : (
-                              <p className="whitespace-pre-wrap select-text break-all">{msg.text}</p>
+                              <div className="flex flex-col gap-2">
+                                <p className="whitespace-pre-wrap select-text break-all">{msg.text}</p>
+                                {/* 如果有绑定发送的文件路径，在此显示标签 */}
+                                {msg.filePaths && msg.filePaths.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-1 pt-1.5 border-t border-white/10">
+                                    {msg.filePaths.map((fp, i) => {
+                                      const fn = fp.split(/[/\\]/).pop() || fp;
+                                      return (
+                                        <div key={i} className="flex items-center gap-1 bg-white/10 text-white/95 px-1.5 py-0.5 rounded text-[9px] font-mono select-none">
+                                          {renderAttachmentIcon(getFileType(fn))}
+                                          <span>{fn}</span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
                             )}
                           </>
                         )}
@@ -701,7 +766,6 @@ export default function App() {
                         </div>
                       )}
 
-                      {/* AI 消息元数据 */}
                       {msg.sender === 'ai' && !msg.isEditing && (
                         <div className="mt-1 pt-1.5 border-t border-white/5 flex items-center gap-2 text-[10px] text-gray-500 font-mono select-none">
                           <span>提供商: <strong className="text-gray-400 font-medium">{msg.provider || "未知"}</strong></span>
@@ -737,9 +801,28 @@ export default function App() {
         {/* 底部输入框区 */}
         <div className="p-6 bg-[#202020] border-t border-[#282828] shrink-0 relative">
           <div className="max-w-3xl mx-auto bg-[#2e2e2e] rounded-xl border border-[#3e3e3e] shadow-lg flex flex-col px-3 pt-3 pb-2 focus-within:border-[#4d4d4d] transition-all">
+            
+            {/* 附件预览框卡片栏 */}
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap gap-2 px-2 pb-2 border-b border-[#3e3e3e] mb-2 animate-in fade-in duration-100">
+                {attachments.map((file, idx) => (
+                  <div key={idx} className="flex items-center gap-1.5 bg-[#252526] px-2 py-1 rounded-md border border-[#3e3e3e] text-[10px] text-gray-300 font-mono relative group">
+                    {renderAttachmentIcon(file.type)}
+                    <span className="max-w-[120px] truncate">{file.name}</span>
+                    <button 
+                      onClick={() => handleRemoveAttachment(idx)}
+                      className="ml-1 p-0.5 text-gray-500 hover:text-red-400 rounded-full transition-colors cursor-pointer"
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <textarea
               rows={2}
-              placeholder={isLoading ? "请等待当前回复完成..." : "在此处输入聊天内容..."}
+              placeholder={isLoading ? "请等待当前回复完成..." : "在此处输入聊天内容，点击纸夹按钮选择文件..."}
               disabled={isLoading}
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
@@ -752,8 +835,17 @@ export default function App() {
               className="w-full bg-transparent border-none outline-none resize-none text-xs text-[#e3e3e3] placeholder-gray-500 px-2"
             />
 
-            {/* 调整 flex 为 justify-end，并移除了原有的无功能图标列表 */}
-            <div className="flex items-center justify-end border-t border-[#3a3a3a] pt-2 mt-2">
+            <div className="flex items-center justify-between border-t border-[#3a3a3a] pt-2 mt-2">
+              
+              {/* 左侧增加附件按钮 */}
+              <button 
+                onClick={handleSelectFiles}
+                disabled={isLoading}
+                title="选择本地代码、图片或Office文档作为上下文"
+                className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-[#3a3a3a] transition-all cursor-pointer"
+              >
+                <Paperclip size={14} />
+              </button>
 
               {/* 右侧发送及模型下拉选择器 */}
               <div className="flex items-center gap-2 relative">
@@ -762,7 +854,6 @@ export default function App() {
                     onClick={(e) => { e.stopPropagation(); setShowModelDropdown(!showModelDropdown); }}
                     className="text-[10px] text-gray-400 hover:text-white font-semibold bg-[#202020] px-2.5 py-1.5 rounded border border-[#353535] flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
-                    {/* 根据不同的模型属性，改变状态圆点颜色 */}
                     <span className={`w-1.5 h-1.5 rounded-full ${
                       selectedModel.includes("pro") 
                         ? "bg-amber-500 animate-pulse" 
@@ -796,9 +887,9 @@ export default function App() {
 
                 <button 
                   onClick={handleSendMessage}
-                  disabled={!inputText.trim() || isLoading}
+                  disabled={(!inputText.trim() && attachments.length === 0) || isLoading}
                   className={`w-7 h-7 rounded-full flex items-center justify-center transition-all cursor-pointer ${
-                    inputText.trim() && !isLoading ? 'bg-white text-black hover:bg-gray-200' : 'bg-[#3e3e3e] text-gray-500 cursor-not-allowed'
+                    (inputText.trim() || attachments.length > 0) && !isLoading ? 'bg-white text-black hover:bg-gray-200' : 'bg-[#3e3e3e] text-gray-500 cursor-not-allowed'
                   }`}
                 >
                   <Send size={12} />
@@ -811,7 +902,7 @@ export default function App() {
 
       </div>
 
-      {/* 3. 侧边栏对话删除菜单 (原有) */}
+      {/* 3. 侧边栏对话删除菜单 */}
       {contextMenu.visible && (
         <div 
           style={{ top: contextMenu.y, left: contextMenu.x }}
@@ -836,7 +927,6 @@ export default function App() {
           style={{ top: msgContextMenu.y, left: msgContextMenu.x }}
           className="fixed bg-[#232324] border border-[#38383a] rounded-lg shadow-2xl py-1 w-44 z-[9999] animate-in fade-in duration-100 font-sans"
         >
-          {/* 所有消息都可以被编辑 */}
           <button
             onClick={() => {
               if (msgContextMenu.targetMessageId) {
@@ -850,7 +940,6 @@ export default function App() {
             <span>编辑此消息</span>
           </button>
 
-          {/* 只能选中用户说的某句话才显示“发送这条消息”来开启新分支 */}
           {msgContextMenu.targetMessageSender === "user" && (
             <button
               onClick={() => {
