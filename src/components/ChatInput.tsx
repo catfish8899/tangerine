@@ -8,7 +8,9 @@ import {
   FileText,
   FileAudio,
   FileSpreadsheet,
-  FileImage
+  FileImage,
+  Globe,
+  BrainCircuit
 } from "lucide-react";
 import { AttachmentFile, getFileType } from "../types/chat";
 
@@ -25,6 +27,9 @@ interface ChatInputProps {
   onSelectFiles: () => void;
   onRemoveAttachment: (idx: number) => void;
   onSendMessage: () => void;
+  // 👇 改为三态网络搜索控制: 'off' | 'direct' | 'agent'
+  webSearchMode: 'off' | 'direct' | 'agent';
+  setWebSearchMode: (mode: 'off' | 'direct' | 'agent') => void;
 }
 
 export default function ChatInput({
@@ -39,7 +44,9 @@ export default function ChatInput({
   setSelectedModel,
   onSelectFiles,
   onRemoveAttachment,
-  onSendMessage
+  onSendMessage,
+  webSearchMode,
+  setWebSearchMode
 }: ChatInputProps) {
 
   const renderAttachmentIcon = (type: AttachmentFile['type']) => {
@@ -51,6 +58,42 @@ export default function ChatInput({
       default: return <FileText size={14} className="text-gray-400" />;
     }
   };
+
+  // 循环切换三态
+  const handleToggleSearchMode = () => {
+    if (webSearchMode === 'off') {
+      setWebSearchMode('direct');
+    } else if (webSearchMode === 'direct') {
+      setWebSearchMode('agent');
+    } else {
+      setWebSearchMode('off');
+    }
+  };
+
+  // 根据当前状态，渲染不同的 Fluent 徽章样式
+  const getSearchButtonStyles = () => {
+    if (webSearchMode === 'direct') {
+      return {
+        classes: "bg-[#2d3a32] text-emerald-400 border border-[#1e4620] hover:bg-[#34463a]",
+        title: "联网直接检索：直接利用您的输入搜索网络一轮，快速且省 Token",
+        label: "直接检索"
+      };
+    }
+    if (webSearchMode === 'agent') {
+      return {
+        classes: "bg-[#2b3a4a] text-sky-400 border border-[#1e3d4e] hover:bg-[#344a5e] animate-pulse",
+        title: "模型自主检索：由大模型思考构建搜索词并自主判断，最多检索3轮",
+        label: "模型检索"
+      };
+    }
+    return {
+      classes: "text-gray-400 hover:text-white hover:bg-[#3a3a3a] border border-transparent",
+      title: "联网搜索关闭：纯模型直接回答",
+      label: "联网关闭"
+    };
+  };
+
+  const btnStyles = getSearchButtonStyles();
 
   return (
     <div className="p-6 bg-[#202020] border-t border-[#282828] shrink-0 relative">
@@ -91,15 +134,31 @@ export default function ChatInput({
 
         <div className="flex items-center justify-between border-t border-[#3a3a3a] pt-2 mt-2">
           
-          {/* 左侧增加附件按钮 */}
-          <button 
-            onClick={onSelectFiles}
-            disabled={isLoading}
-            title="选择本地代码、图片或Office文档作为上下文"
-            className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-[#3a3a3a] transition-all cursor-pointer"
-          >
-            <Paperclip size={14} />
-          </button>
+          {/* 左侧增加附件与三态联网切换按钮 */}
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={onSelectFiles}
+              disabled={isLoading}
+              title="选择本地代码、图片或Office文档作为上下文"
+              className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-[#3a3a3a] transition-all cursor-pointer"
+            >
+              <Paperclip size={14} />
+            </button>
+
+            {/* Fluent 风格三态切换按钮 */}
+            <button
+              onClick={handleToggleSearchMode}
+              title={btnStyles.title}
+              className={`p-1.5 rounded flex items-center gap-1.5 transition-all cursor-pointer text-xs ${btnStyles.classes}`}
+            >
+              {webSearchMode === 'agent' ? (
+                <BrainCircuit size={14} className="text-sky-400" />
+              ) : (
+                <Globe size={14} className={webSearchMode === 'direct' ? "animate-spin-slow text-emerald-400" : ""} />
+              )}
+              <span className="text-[10px] font-semibold select-none">{btnStyles.label}</span>
+            </button>
+          </div>
 
           {/* 右侧发送及模型下拉选择器 */}
           <div className="flex items-center gap-2 relative">

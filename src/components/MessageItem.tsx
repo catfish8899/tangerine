@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { 
   ChevronLeft, 
   ChevronRight,
@@ -6,8 +6,16 @@ import {
   FileText,
   FileAudio,
   FileSpreadsheet,
-  FileImage
+  FileImage,
+  Globe,
+  ChevronDown,
+  ChevronUp,
+  Search,
+  CheckCircle2,
+  ExternalLink
 } from "lucide-react";
+// 👇 导入 Tauri 原生 shell 安全浏览器跳转能力
+import { open } from "@tauri-apps/plugin-shell";
 import { Message, getFileType, format12HourTime } from "../types/chat";
 import MarkdownMessage from "./MarkdownMessage";
 
@@ -32,6 +40,9 @@ export default function MessageItem({
   const hasBranches = msg.branches && msg.branches.length > 1;
   const activeIdx = msg.activeBranchIndex ?? 0;
   const branchesCount = msg.branches ? msg.branches.length : 0;
+  
+  // 控制网络搜索引用源抽屉的展开与折叠状态
+  const [isSourcesOpen, setIsSourcesOpen] = useState(false);
 
   const renderAttachmentIcon = (type: 'image' | 'audio' | 'code' | 'office' | 'other') => {
     switch(type) {
@@ -40,6 +51,15 @@ export default function MessageItem({
       case 'code': return <FileCode size={14} className="text-blue-400" />;
       case 'office': return <FileSpreadsheet size={14} className="text-orange-400" />;
       default: return <FileText size={14} className="text-gray-400" />;
+    }
+  };
+
+  // 通过系统的默认浏览器打开 URL，保证桌面安全体验
+  const handleOpenUrl = async (url: string) => {
+    try {
+      await open(url);
+    } catch (err) {
+      console.error("无法调用系统浏览器打开 URL: ", err);
     }
   };
 
@@ -90,7 +110,63 @@ export default function MessageItem({
           ) : (
             <>
               {msg.sender === 'ai' ? (
-                <MarkdownMessage text={msg.text} fontSize={chatFontSize} />
+                <div className="flex flex-col gap-2">
+                  
+                  {/* 当 AI 返回了 sources 时，渲染 Fluent 风格的折叠检索轨迹 */}
+                  {msg.sources && msg.sources.length > 0 && (
+                    <div className="mb-2 border border-[#3d4a3e] bg-[#232b24]/50 rounded-lg p-2 text-xs text-[#a9d1b1] w-full font-sans shadow-sm select-none">
+                      <button
+                        onClick={() => setIsSourcesOpen(!isSourcesOpen)}
+                        className="w-full flex items-center justify-between text-left font-semibold focus:outline-none cursor-pointer group/btn"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <Globe size={13} className="text-emerald-400 animate-pulse shrink-0" />
+                          <span className="text-emerald-300">Tavily 联网验证完毕</span>
+                          <span className="px-1.5 py-0.5 bg-emerald-950/80 text-emerald-400 text-[9px] rounded font-mono border border-emerald-800/40">
+                            {msg.sources.length} 个参考源
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1 text-[#8fb997] group-hover/btn:text-emerald-200 transition-colors">
+                          <span>{isSourcesOpen ? "折叠过程" : "查看检索轨迹"}</span>
+                          {isSourcesOpen ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                        </div>
+                      </button>
+
+                      {/* 展开的动作轨迹轨迹和源链接 */}
+                      {isSourcesOpen && (
+                        <div className="mt-2 pt-2 border-t border-[#344035] space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-150">
+                          <div className="flex flex-col gap-1 text-[10px] text-[#8cb096]">
+                            <div className="flex items-center gap-1.5">
+                              <Search size={10} className="text-emerald-400 shrink-0" />
+                              <span>动作过程: 提取多轮检索词，捕获网页正文并去除冗余噪声</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <CheckCircle2 size={10} className="text-emerald-400 shrink-0" />
+                              <span>语义匹配: 完成多模态融合及引用源格式化输出</span>
+                            </div>
+                          </div>
+
+                          <div className="text-[10px] font-semibold text-emerald-400 mt-1.5">已采信的引用信源（点击唤起浏览器查看）：</div>
+                          <div className="grid grid-cols-1 gap-1 max-h-32 overflow-y-auto scrollbar-thin pr-1">
+                            {msg.sources.map((src, index) => (
+                              <button
+                                key={index}
+                                onClick={() => handleOpenUrl(src.url)}
+                                className="flex items-center justify-between text-left gap-2 p-1.5 rounded bg-[#1e2520] hover:bg-[#28322a] border border-[#2d3a31] text-[#9ec5a6] hover:text-white transition-all group/link cursor-pointer w-full"
+                              >
+                                <span className="truncate max-w-[420px] font-medium text-[10px]">{src.title || src.url}</span>
+                                <ExternalLink size={10} className="opacity-60 group-hover/link:opacity-100 shrink-0" />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 正常 Markdown 消息渲染 */}
+                  <MarkdownMessage text={msg.text} fontSize={chatFontSize} />
+                </div>
               ) : (
                 <div className="flex flex-col gap-2">
                   <p className="whitespace-pre-wrap select-text break-all">{msg.text}</p>

@@ -42,6 +42,9 @@ export default function App() {
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
+  
+  // 👇 改为三态网络搜索控制: 'off' | 'direct' | 'agent'
+  const [webSearchMode, setWebSearchMode] = useState<'off' | 'direct' | 'agent'>('off');
 
   const [chatFontSize, setChatFontSize] = useState<string>(() => {
     return localStorage.getItem(FONT_SIZE_STORAGE_KEY) || "12px";
@@ -333,7 +336,8 @@ export default function App() {
         body: JSON.stringify({
           model: selectedModel,
           messages: [{ role: "system", content: "You are a helpful assistant" }, ...apiMessages],
-          file_paths: filePathsToSend
+          file_paths: filePathsToSend,
+          web_search: webSearchMode // 传递三态值：'off' | 'direct' | 'agent'
         })
       });
 
@@ -359,7 +363,8 @@ export default function App() {
         provider: selectedModel.toLowerCase().includes("deepseek") ? "deepseek" : "ollama",
         model: selectedModel,
         tokensUsed: tokensUsed,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        sources: data.sources || [] // 存储联网引用源
       };
 
       setSessions(prev => prev.map(s => {
@@ -493,7 +498,8 @@ export default function App() {
         body: JSON.stringify({
           model: selectedModel,
           messages: [{ role: "system", content: "You are a helpful assistant" }, ...apiMessages],
-          file_paths: filePathsToSend
+          file_paths: filePathsToSend,
+          web_search: webSearchMode // 传递三态值：'off' | 'direct' | 'agent'
         })
       });
 
@@ -520,7 +526,8 @@ export default function App() {
         provider: selectedModel.toLowerCase().includes("deepseek") ? "deepseek" : "ollama",
         model: selectedModel,
         tokensUsed: tokensUsed,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        sources: data.sources || [] // 存储联网引用源
       };
 
       setSessions(prev => prev.map(session => {
@@ -604,7 +611,7 @@ export default function App() {
                     className="bg-[#2e2e2e] text-gray-400 border border-[#3a3a3a] p-3.5 rounded-xl flex items-center gap-2"
                   >
                     <Loader size={12} className="animate-spin text-[#4ea1db]" />
-                    <span>{selectedModel.toLowerCase().includes("deepseek") ? "DeepSeek 正在思考中..." : "本地模型正在推理中..."}</span>
+                    <span>{webSearchMode === 'agent' ? "Tavily AI自主检索多轮决策中..." : webSearchMode === 'direct' ? "Tavily 正在直接抓取一轮中..." : (selectedModel.toLowerCase().includes("deepseek") ? "DeepSeek 正在思考中..." : "本地模型正在推理中...")}</span>
                   </div>
                 </div>
               )}
@@ -627,6 +634,8 @@ export default function App() {
           onSelectFiles={handleSelectFiles}
           onRemoveAttachment={handleRemoveAttachment}
           onSendMessage={handleSendMessage}
+          webSearchMode={webSearchMode}
+          setWebSearchMode={setWebSearchMode}
         />
 
       </div>
@@ -637,71 +646,53 @@ export default function App() {
           style={{ top: contextMenu.y, left: contextMenu.x }}
           className="fixed bg-[#232324] border border-[#38383a] rounded-lg shadow-2xl py-1 w-32 z-[9999] animate-in fade-in duration-100"
         >
-          <button
-            onClick={() => {
-              if (contextMenu.targetSessionId) { handleDeleteSession(contextMenu.targetSessionId); }
-              setContextMenu(prev => ({ ...prev, visible: false }));
-            }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-[#333] hover:text-red-300 transition-colors text-left cursor-pointer"
+          <button 
+            onClick={() => handleDeleteSession(contextMenu.targetSessionId || "")}
+            className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-[#2d2d2e] flex items-center gap-1.5 transition-colors cursor-pointer"
           >
-            <Trash2 size={13} />
-            <span>删除对话</span>
+            <Trash2 size={12} />
+            <span>删除会话</span>
           </button>
         </div>
       )}
 
-      {/* 4. 对话气泡右键多功能菜单 */}
+      {/* 4. 对话右键多功能菜单 */}
       {msgContextMenu.visible && (
         <div 
           style={{ top: msgContextMenu.y, left: msgContextMenu.x }}
-          className="fixed bg-[#232324] border border-[#38383a] rounded-lg shadow-2xl py-1 w-44 z-[9999] animate-in fade-in duration-100 font-sans"
+          className="fixed bg-[#232324] border border-[#38383a] rounded-lg shadow-2xl py-1 w-32 z-[9999] animate-in fade-in duration-100"
         >
-          <button
-            onClick={() => {
-              if (msgContextMenu.targetMessageId) {
-                handleStartEdit(msgContextMenu.targetMessageId);
-              }
-              setMsgContextMenu(prev => ({ ...prev, visible: false }));
-            }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-[#333] hover:text-white transition-colors text-left cursor-pointer"
-          >
-            <Edit3 size={13} className="text-blue-400" />
-            <span>编辑此消息</span>
-          </button>
-
           {msgContextMenu.targetMessageSender === "user" && (
-            <button
-              onClick={() => {
-                if (msgContextMenu.targetMessageId) {
-                  handleResendMessage(msgContextMenu.targetMessageId);
-                }
-                setMsgContextMenu(prev => ({ ...prev, visible: false }));
-              }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-[#333] hover:text-white transition-colors text-left border-t border-[#303030] cursor-pointer"
+            <button 
+              onClick={() => handleStartEdit(msgContextMenu.targetMessageId || "")}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-[#2d2d2e] flex items-center gap-1.5 transition-colors cursor-pointer"
             >
-              <RefreshCw size={13} className="text-amber-400" />
-              <span>发送这条消息 (新分支)</span>
+              <Edit3 size={12} />
+              <span>编辑消息</span>
             </button>
           )}
-
-          <button
-            onClick={() => {
-              if (msgContextMenu.targetMessageId) {
-                handleDeleteMessage(msgContextMenu.targetMessageId);
-              }
-              setMsgContextMenu(prev => ({ ...prev, visible: false }));
-            }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-[#333] hover:text-red-300 transition-colors text-left border-t border-[#303030] cursor-pointer"
+          {msgContextMenu.targetMessageSender === "user" && (
+            <button 
+              onClick={() => handleResendMessage(msgContextMenu.targetMessageId || "")}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-[#2d2d2e] flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <RefreshCw size={12} />
+              <span>多分支重发</span>
+            </button>
+          )}
+          <button 
+            onClick={() => handleDeleteMessage(msgContextMenu.targetMessageId || "")}
+            className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-[#2d2d2e] flex items-center gap-1.5 transition-colors cursor-pointer"
           >
-            <Trash2 size={13} />
-            <span>删除此消息</span>
+            <Trash2 size={12} />
+            <span>删除消息</span>
           </button>
         </div>
       )}
 
-      {/* 5. 模型 API 设置弹窗 */}
+      {/* 5. 设置弹窗 */}
       <SettingsModal 
-        isOpen={showSettings} 
+        isOpen={showSettings}
         onClose={() => setShowSettings(false)} 
       />
 

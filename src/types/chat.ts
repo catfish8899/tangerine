@@ -12,6 +12,9 @@ export interface Message {
   isEditing?: boolean;
   activeBranchIndex?: number;
   branches?: Message[][]; // 存储该用户消息发起的分支（每个分支包含该节点之后的所有后续消息数组）
+
+  // 👇 新增：保存 Tavily 联网检索的来源网页列表（每个来源包括标题和跳转链接）
+  sources?: Array<{ title: string; url: string }>;
 }
 
 export interface ChatSession {

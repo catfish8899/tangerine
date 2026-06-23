@@ -7,6 +7,7 @@ struct PyProcess(Mutex<Option<std::process::Child>>);
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             // 自动在后台启动我们的 Python Sidecar
             println!("正在启动 Python Sidecar 服务...");

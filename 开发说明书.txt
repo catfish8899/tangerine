@@ -1,33 +1,29 @@
-### tangerine 桌面 AI 助手 - 阶段性开发说明书
-
+tangerine 桌面 AI 助手 - 阶段性开发说明书
 本项目是一款基于 Windows 11 Fluent Design（暗黑微光风格）的 AI 智能聊天客户端。应用后端使用 Rust (Tauri 2.0) 管理窗口及生命周期，并通过本地 Python Sidecar 服务桥接调用云端 DeepSeek API 及本地 Ollama 服务，确保 API 密钥的安全性和本地扩展能力。
 
---------------------------------------------------------------------------------------------------------------------------------
+一、 技术栈组成 & 新增前端依赖
+宿主与壳层 (Desktop Shell)
 
-#### 一、 技术栈组成 & 新增前端依赖
-**宿主与壳层 (Desktop Shell)**
-- Tauri 2.0：轻量级桌面开发框架。使用 Rust 构建，负责管理应用窗口、文件系统访问，以及在后台自动拉起和管理 Python Sidecar 子进程。
+Tauri 2.0：轻量级桌面开发框架。使用 Rust 构建，负责管理应用窗口、文件系统访问，以及在后台自动拉起和管理 Python Sidecar 子进程。
+@tauri-apps/plugin-shell（新增）：用于在桌面壳中跨进程、安全地调用 Windows 操作系统的默认浏览器（Chrome / Edge）打开网页引用源。
+安装命令： pnpm tauri add shell
+前端界面 (Frontend UI)
 
-**前端界面 (Frontend UI)**
-- React 18 & TypeScript：用于高效率的前端组件开发与强类型保证。
-- Vite 6：极其快速的现代化前端构建与热重载工具。
-- Tailwind CSS v4 (@tailwindcss/postcss)：采用全新 v4 架构。通过引入 `@import "tailwindcss";` 结合 `@source` 动态规则，极速提取 Fluent 风格组件样式。
-- Lucide React：现代、简洁、一致的图标库。
-
-**前端渲染与高亮依赖**
+React 18 & TypeScript：用于高效率的前端组件开发与强类型保证。
+Vite 6：极其快速的现代化前端构建与热重载工具。
+Tailwind CSS v4 (@tailwindcss/postcss)：采用全新 v4 架构。通过引入 @import "tailwindcss"; 结合 @source 动态规则，极速提取 Fluent 风格组件样式。
+Lucide React：现代、简洁、一致的图标库。
+前端渲染与高亮依赖
 为了实现高可读性的 AI 消息回复、代码框样式与高亮：
-- react-markdown: 用于解析并渲染 AI 返回的 Markdown 数据。
-- remark-gfm: 插件，支持 GitHub 风格的 Markdown（表格、任务列表等）。
-- rehype-highlight & highlight.js: 插件及主题包，用于解析代码块并提供 Atom One Dark 彩色高亮样式。
+
+react-markdown: 用于解析并渲染 AI 返回的 Markdown 数据。
+remark-gfm: 插件，支持 GitHub 风格的 Markdown（表格、任务列表等）。
+rehype-highlight & highlight.js: 插件及主题包，用于解析代码块并提供 Atom One Dark 彩色高亮样式。
 安装命令：
-  `pnpm add react-markdown remark-gfm rehype-highlight highlight.js`
-
---------------------------------------------------------------------------------------------------------------------------------
-
-#### 二、 项目文件夹结构
+pnpm add react-markdown remark-gfm rehype-highlight highlight.js
+二、 项目文件夹结构
 以下是本项目目前已构建的核心文件夹结构，重点标注了我们修改/新建以及解耦重构的关键文件：
 
-```text
 tangerine/
 ├── .github/                       # (可选) GitHub Action 持续集成配置
 ├── node_modules/                  # 前端依赖缓存目录
@@ -36,20 +32,21 @@ tangerine/
 │   ├── components/                # [组件目录]
 │   │   ├── CodeBlock.tsx          # 可复制代码块：支持传入 fontSize 参数，微调代码文字大小以自适应全局对话字号设置
 │   │   ├── MarkdownMessage.tsx    # Markdown 解析器：接收外部 fontSize，动态自适应行内代码、表格及多级标题比例，进行 Fluent 风格渲染
-│   │   ├── MessageItem.tsx        # [新解耦] 消息渲染组件：专门管理单条消息的气泡呈现、编辑模式、分支切换、文件附件显示
-│   │   ├── ChatInput.tsx          # [新解耦] 底部输入组件：包含附件预览栏、输入框、添加附件按钮、混合模型下拉选择器
+│   │   ├── MessageItem.tsx        # [已修改] 消息渲染组件：专门管理单条消息的气泡呈现、编辑模式、分支切换、文件附件显示。新增对 Tavily 联网引用源（sources）的流畅解析，通过 Fluent 微光抽屉折叠展现“多轮检索轨迹”，利用 @tauri-apps/plugin-shell 安全调用默认浏览器进行一键跳转
+│   │   ├── ChatInput.tsx          # [已修改] 底部输入组件：包含附件预览栏、输入框、添加附件按钮、混合模型下拉选择器。新增“网络搜索三态切换开关”，左键点击可在“联网关闭”、“直接检索（单轮省 Token）”、“模型检索（自主 ReAct 多轮）”三种状态间流畅切换并配合微光动画展示
 │   │   ├── Sidebar.tsx            # 侧边栏：管理聊天历史切换、右键菜单、新建会话以及跳转“设置”
 │   │   └── SettingsModal.tsx      # [已修改] 设置面板：重构为多 Tab 导航（“云端模型设置”、“本地模型设置”和“对话格式设置”）。支持本地 Ollama 状态一键检测、本地模型一键同步检索，并在本地模型设置底部支持专属 Ollama 管理，完全避免与云端 API 产生配置挤占与物理顶替。
 │   ├── types/                     # [类型目录]
-│   │   └── chat.ts                # [新解耦] 类型声明文件：承载 Session、Message、Attachment 类型定义与文件类型/时间处理辅助函数
-│   ├── App.tsx                    # [已修改] 主界面组件：作为核心控制器，新增全局字号监听与分发、双系统右键删除菜单、API Token 多路径捕获。支持动态拉取加载本地与云端的混合模型列表，对非 DeepSeek（如本地 Ollama 导入）的模型进行智能多通路请求路由，且支持 3 秒 Fluent 质感警示弹窗与严密的 [用户-AI] 交替守卫。
+│   │   └── chat.ts                # [已修改] 类型声明文件：承载 Session、Message、Attachment 类型定义与文件类型/时间处理辅助函数。在 Message 类型中新增 sources 属性声明，用于存放采信的互联网网页标题与超链接
+│   ├── App.tsx                    # [已修改] 主界面组件：作为核心控制器，新增全局字号监听与分发、双系统右键删除菜单、API Token 多路径捕获。支持动态拉取加载本地与云端的混合模型列表。在发送和重发消息时，提取 webSearchMode 状态实时透传发送给本地 FastAPI 接口
 │   ├── index.css                  # Tailwind v4 规范升级：引入 @import "tailwindcss" 并声明 @source 自定义扫描源
 │   ├── main.tsx                   # 前端入口文件：引入 React、App 组件并加载 index.css、highlight.js/styles/atom-one-dark.css
 │   └── vite-env.d.ts              # Vite 环境变量类型定义
 ├── src-tauri/                     # Rust 宿主后端源代码
 │   ├── py_sidecar/                # [Python Sidecar 服务目录]
-│   │   ├── main.py                # [已修改] 本地 FastAPI 服务：兼容云端 DeepSeek (读取系统 DEEPSEEK_API_KEY) 与本地 Ollama 服务转发。新增本地服务检测接口 (/api/ollama/status) 与本地已下载模型拉取接口 (/api/ollama/tags)。
-│   │   └── requirements.txt       # Python 依赖声明
+│   │   ├── main.py                # [已修改] 本地 FastAPI 服务：兼容云端 DeepSeek 与本地 Ollama。新增一键拉取本地模型接口、Tkinter原生文件选择器。完全重写联网搜索模块：集成 tavily-python，支持 direct 单轮检索和 agent 状态下的自主决策 ReAct 多轮检索（最大3轮限制，支持本地与云端模型通用释放）。内置非阻塞式调试器广播管道
+│   │   ├── debugger.py            # [新增] 开发者实时调试监控面板：完全独立的控制台热插拔调试脚本。开启后本地启动 9999 端口，以终端彩色标记（Hardcore Debugger）高亮展示每一次大模型推理前灌入的【完整上下文数据（包含合并System、多轮 Observation）】与【模型生鲜 Output】
+│   │   └── requirements.txt       # [已修改] Python 依赖声明：彻底合并 LlamaCloud 解析依赖与 tavily-python 依赖
 │   ├── src/
 │   │   ├── lib.rs                 # Tauri 启动入口：包含智能路径识别，在后台伴随 Tauri 自动拉起/管理 Python 子进程
 │   │   └── main.rs                # Rust 程序编译入口
@@ -64,7 +61,7 @@ tangerine/
 
 --------------------------------------------------------------------------------------------------------------------------------
 
-三、 项目环境依赖与多电脑协同开发
+#### 三、 项目环境依赖与多电脑协同开发
 为了能在不同的电脑上通过 GitHub 克隆代码后快速恢复开发，请确保目标电脑满足以下环境：
 
 1. 全局系统环境要求
@@ -73,13 +70,17 @@ Node.js：建议安装 v18.x 或 v20.x LTS 版本。
 pnpm：推荐使用的前端包管理器。
 Rust 编译链：安装 Rustup，且 Windows 电脑需要 C++ 生成工具（VS C++ 桌面开发工作负载）。
 Python 3：确保 python 已添加到系统环境变量 PATH 中。
-环境变量：系统中建议保留 DEEPSEEK_API_KEY 作为云端首选秘钥（后续可通过设置面板自定义配置）。
-本地服务（可选）：若要启用离线 AI，建议安装本地 Ollama 并拉取相应模型（如 qwen2.5 等）。
+环境变量：
+  - `DEEPSEEK_API_KEY`：云端首选秘钥（后续可通过设置面板自定义配置）。
+  - `TAVILY_API_KEY`：Tavily 联网搜索 API 密钥。
+本地服务（可选）：若要启用离线 AI，建议安装本地 Ollama 并拉取相应模型（如 qwen2.5、gemma4 等）。
+
 2. 跨电脑克隆后的快速启动步骤
 在新电脑上克隆仓库后，只需在项目根目录下依次执行以下命令：
 
-步骤 A：安装前端依赖
+步骤 A：安装前端及 Tauri 依赖
 pnpm install
+pnpm tauri add shell
 
 步骤 B：安装 Python Sidecar 依赖
 pip install -r src-tauri/py_sidecar/requirements.txt
@@ -88,3 +89,8 @@ pip install -r src-tauri/py_sidecar/requirements.txt
 如遇到样式未能实时加载等现象，建议清理 Vite 缓存：
 PowerShell: Remove-Item -Recurse -Force .vite
 启动开发服务：pnpm tauri dev
+
+步骤 D（可选调试）：启动开发者实时调试面板
+在另一个终端下进入 `src-tauri/py_sidecar/`，运行：
+python debugger.py
+即可开启硬件级时序上下文监控面板。
