@@ -1,0 +1,21 @@
+安装 SDK：
+pip install llama-cloud>=2.1
+
+------------------------------------------------------------------------------
+解析文档：
+
+from llama_cloud import LlamaCloud
+
+client = LlamaCloud()  # reads LLAMA_CLOUD_API_KEY from the environment
+
+# Upload and parse a document
+file = client.files.create(file="./attention_is_all_you_need.pdf", purpose="parse")
+result = client.parsing.parse(
+    file_id=file.id,
+    tier="agentic",
+    version="latest",
+    expand=["markdown"],
+)
+
+# Print the markdown for the first page
+print(result.markdown.pages[0].markdown)
