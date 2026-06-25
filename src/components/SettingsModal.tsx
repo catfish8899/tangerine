@@ -37,6 +37,13 @@ const DEFAULT_CONFIGS: ApiProviderConfig[] = [
     baseUrl: "https://api.deepseek.com",
     envKeyName: "DEEPSEEK_API_KEY",
     models: ["deepseek-v4-flash", "deepseek-v4-pro"],
+  },
+  {
+    id: "gemini-default",
+    providerName: "gemini",
+    baseUrl: "https://generativelies.googleapis.com",
+    envKeyName: "GEMINI_API_KEY",
+    models: ["gemini-3.5-flash"],
   }
 ];
 
@@ -71,7 +78,17 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     const savedConfigs = localStorage.getItem(SETTINGS_STORAGE_KEY);
     if (savedConfigs) {
       try {
-        setConfigs(JSON.parse(savedConfigs));
+        const parsed = JSON.parse(savedConfigs);
+        // 升级校验：如果用户的 localStorage 里没有 gemini 配置，则追加
+        const hasGemini = parsed.some((c: ApiProviderConfig) => c.providerName.toLowerCase() === "gemini");
+        if (!hasGemini) {
+          const geminiDefault = DEFAULT_CONFIGS.find(c => c.providerName === "gemini");
+          if (geminiDefault) {
+            parsed.push(geminiDefault);
+            localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(parsed));
+          }
+        }
+        setConfigs(parsed);
       } catch (e) {
         console.error("加载设置失败：", e);
         setConfigs(DEFAULT_CONFIGS);
@@ -473,7 +490,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               </>
             )}
 
-            {/* TAB 2: 本地模型设置（整合：模型检测、一键同步、以及专属 Ollama 模型修改面板） */}
+            {/* TAB 2: 本地模型设置 */}
             {activeTab === "local" && (
               <div className="space-y-6">
                 <div>
@@ -537,7 +554,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   </button>
                 </div>
 
-                {/* 3. [新增且挪至此处] 专属 OLLAMA 细节配置管理块 */}
+                {/* 3. 专属 OLLAMA 细节配置管理块 */}
                 {ollamaConfig && (
                   <div className="p-6 rounded-xl border border-white/5 bg-[#141415] shadow-lg hover:border-white/10 transition-all mt-6">
                     <div className="flex items-center justify-between mb-5 pb-3 border-b border-white/5">
@@ -699,7 +716,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           style={{ fontSize: fontSize }} 
                           className="max-w-[85%] p-3 rounded-lg bg-[#2e2e2e] text-gray-200 border border-[#3a3a3a] rounded-tl-none leading-relaxed"
                         >
-                         热狗是非常热的狗🐕。
+                         热狗是一种包含面包与香肠的食物。
                         </div>
                       </div>
                     </div>

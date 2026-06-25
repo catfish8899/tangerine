@@ -3,3 +3,4 @@ fastapi
 uvicorn
 tavily-python
 llama-cloud>=2.1
+google-genai

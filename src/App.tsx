@@ -75,6 +75,14 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
   }, [sessions]);
 
+  // 根据当前选中的模型自动推导提供商（Provider）
+  const getProviderByModel = (model: string): string => {
+    const lowerModel = model.toLowerCase();
+    if (lowerModel.includes("gemini")) return "gemini";
+    if (lowerModel.includes("deepseek")) return "deepseek";
+    return "ollama";
+  };
+
   const syncModelsFromSettings = () => {
     const savedConfigs = localStorage.getItem(SETTINGS_STORAGE_KEY);
     if (savedConfigs) {
@@ -329,12 +337,15 @@ export default function App() {
         }));
 
       const filePathsToSend = targetMsg.filePaths || [];
+      // 👇 强制判定保障 Gemini 绝不错分到 Ollama 分支！
+      const currentProvider = getProviderByModel(selectedModel);
 
       const response = await fetch("http://127.0.0.1:5678/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: selectedModel,
+          provider: currentProvider,
           messages: [{ role: "system", content: "You are a helpful assistant" }, ...apiMessages],
           file_paths: filePathsToSend,
           web_search: webSearchMode // 传递三态值：'off' | 'direct' | 'agent'
@@ -360,7 +371,7 @@ export default function App() {
         id: (Date.now() + 1).toString(), 
         sender: "ai", 
         text: data.content,
-        provider: selectedModel.toLowerCase().includes("deepseek") ? "deepseek" : "ollama",
+        provider: currentProvider,
         model: selectedModel,
         tokensUsed: tokensUsed,
         timestamp: Date.now(),
@@ -418,58 +429,63 @@ export default function App() {
       if (idx === -1) return session;
 
       const targetMsg = { ...session.messages[idx] };
-      let branches = targetMsg.branches ? [...targetMsg.branches] : [];
-      let activeBranchIndex = targetMsg.activeBranchIndex ?? 0;
+      const branches = targetMsg.branches || [];
+      const currentIdx = targetMsg.activeBranchIndex ?? 0;
 
-      if (branches.length <= 1) return session;
-
-      const subsequentMessages = session.messages.slice(idx + 1);
-      branches[activeBranchIndex] = subsequentMessages;
-
-      let newIndex = activeBranchIndex;
-      if (direction === "prev") {
-        newIndex = activeBranchIndex === 0 ? branches.length - 1 : activeBranchIndex - 1;
-      } else {
-        newIndex = activeBranchIndex === branches.length - 1 ? 0 : activeBranchIndex + 1;
+      let newIdx = currentIdx;
+      if (direction === "prev" && currentIdx > 0) {
+        newIdx = currentIdx - 1;
+      } else if (direction === "next" && currentIdx < branches.length - 1) {
+        newIdx = currentIdx + 1;
       }
 
-      targetMsg.branches = branches;
-      targetMsg.activeBranchIndex = newIndex;
+      if (newIdx === currentIdx) return session;
 
-      const nextMessages = [...session.messages.slice(0, idx), targetMsg, ...branches[newIndex]];
+      targetMsg.activeBranchIndex = newIdx;
+
+      const baseMessages = session.messages.slice(0, idx);
+      const branchMessages = branches[newIdx] || [];
 
       return {
         ...session,
-        messages: nextMessages
+        messages: [...baseMessages, targetMsg, ...branchMessages]
       };
     }));
   };
 
-  const handleSendMessage = async () => {
-    if (!inputText.trim() && attachments.length === 0 || isLoading) return;
+  const handleSendMessage = async (customText?: any, filePathsOverride?: string[]) => {
+    if (isLoading) return;
 
-    const userText = inputText;
-    const filePathsToSend = attachments.map(a => a.path);
+    // 👇 拦截 React 点击事件传递的 Event 对象。
+    let userText = "";
+    if (customText && typeof customText === "string") {
+      userText = customText;
+    } else {
+      userText = inputText;
+    }
 
-    const userMessage: Message = { 
-      id: Date.now().toString(), 
-      sender: "user", 
+    const finalFilePaths = filePathsOverride !== undefined ? filePathsOverride : attachments.map(a => a.path);
+
+    if (!userText.trim() && finalFilePaths.length === 0) return;
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      sender: "user",
       text: userText,
       timestamp: Date.now(),
-      filePaths: filePathsToSend
+      filePaths: finalFilePaths
     };
 
-    const proposedMessages = [...activeSession.messages, userMessage];
+    const currentMessages = [...activeSession.messages, userMessage];
 
-    if (!validateAlternatingOrder(proposedMessages)) {
-      setWarningMessage("⚠️ 对话未遵循 ai--用户 顺序结构，请删除对应气泡后再发送。");
-      setTimeout(() => {
-        setWarningMessage(null);
-      }, 3000);
+    if (!validateAlternatingOrder(currentMessages)) {
+      setWarningMessage("⚠️ 对话未遵循 [User-AI] 交替架构，请点击右键清理系统报错或多余消息。");
+      setTimeout(() => setWarningMessage(null), 3500);
       return;
     }
 
-    let currentMessages = [...activeSession.messages, userMessage];
+    const filePathsToSend = [...finalFilePaths];
+
     setSessions(prev => prev.map(session => {
       if (session.id === activeSessionId) {
         const title = session.messages.length === 0 
@@ -492,11 +508,15 @@ export default function App() {
           content: m.text
         }));
 
+      // 👇 强力防御：如果是 Gemini 关键字，强制 Provider 为 gemini！
+      const currentProvider = getProviderByModel(selectedModel);
+
       const response = await fetch("http://127.0.0.1:5678/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: selectedModel,
+          provider: currentProvider,
           messages: [{ role: "system", content: "You are a helpful assistant" }, ...apiMessages],
           file_paths: filePathsToSend,
           web_search: webSearchMode // 传递三态值：'off' | 'direct' | 'agent'
@@ -523,7 +543,7 @@ export default function App() {
         id: (Date.now() + 1).toString(), 
         sender: "ai", 
         text: data.content,
-        provider: selectedModel.toLowerCase().includes("deepseek") ? "deepseek" : "ollama",
+        provider: currentProvider,
         model: selectedModel,
         tokensUsed: tokensUsed,
         timestamp: Date.now(),
@@ -611,7 +631,18 @@ export default function App() {
                     className="bg-[#2e2e2e] text-gray-400 border border-[#3a3a3a] p-3.5 rounded-xl flex items-center gap-2"
                   >
                     <Loader size={12} className="animate-spin text-[#4ea1db]" />
-                    <span>{webSearchMode === 'agent' ? "Tavily AI自主检索多轮决策中..." : webSearchMode === 'direct' ? "Tavily 正在直接抓取一轮中..." : (selectedModel.toLowerCase().includes("deepseek") ? "DeepSeek 正在思考中..." : "本地模型正在推理中...")}</span>
+                    <span>
+                      {webSearchMode === 'agent' 
+                        ? "Tavily AI自主检索多轮决策中..." 
+                        : webSearchMode === 'direct' 
+                        ? "Tavily 正在直接抓取一轮中..." 
+                        : selectedModel.toLowerCase().includes("deepseek") 
+                        ? "DeepSeek 正在思考中..." 
+                        : selectedModel.toLowerCase().includes("gemini") 
+                        ? "Gemini 正在思考中..." 
+                        : "本地模型正在推理中..."
+                      }
+                    </span>
                   </div>
                 </div>
               )}

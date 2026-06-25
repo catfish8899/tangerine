@@ -95,6 +95,18 @@ export default function ChatInput({
 
   const btnStyles = getSearchButtonStyles();
 
+  // 判定模型类型标签显示
+  const getModelLabel = (modelName: string): string => {
+    const lower = modelName.toLowerCase();
+    if (lower.includes("gemini")) {
+      return "Gemini 云端模型";
+    }
+    if (lower.includes("deepseek")) {
+      return "DeepSeek 云端模型";
+    }
+    return "Ollama 本地模型";
+  };
+
   return (
     <div className="p-6 bg-[#202020] border-t border-[#282828] shrink-0 relative">
       <div className="max-w-3xl mx-auto bg-[#2e2e2e] rounded-xl border border-[#3e3e3e] shadow-lg flex flex-col px-3 pt-3 pb-2 focus-within:border-[#4d4d4d] transition-all">
@@ -168,7 +180,9 @@ export default function ChatInput({
                 className="text-[10px] text-gray-400 hover:text-white font-semibold bg-[#202020] px-2.5 py-1.5 rounded border border-[#353535] flex items-center gap-1.5 transition-colors cursor-pointer"
               >
                 <span className={`w-1.5 h-1.5 rounded-full ${
-                  selectedModel.includes("pro") 
+                  selectedModel.toLowerCase().includes("gemini")
+                    ? "bg-blue-400 animate-pulse"
+                    : selectedModel.includes("pro") 
                     ? "bg-amber-500 animate-pulse" 
                     : selectedModel.includes("deepseek") 
                     ? "bg-[#f97316]" 
@@ -190,7 +204,7 @@ export default function ChatInput({
                     >
                       <span>{modelName}</span>
                       <span className="text-[9px] text-gray-500 font-normal">
-                        {modelName.includes("deepseek") ? "云端部署模型" : "Ollama 本地模型"}
+                        {getModelLabel(modelName)}
                       </span>
                     </button>
                   ))}

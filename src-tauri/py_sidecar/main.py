@@ -10,6 +10,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import OpenAI
+from google import genai
+from google.genai import types
 from typing import Optional, List, Dict, Any
 
 app = FastAPI()
@@ -25,15 +27,17 @@ app.add_middleware(
 
 # 获取环境变量里的 API Key
 api_key = os.environ.get('DEEPSEEK_API_KEY')
+gemini_api_key = os.environ.get('GEMINI_API_KEY')
 tavily_api_key = os.environ.get('TAVILY_API_KEY')
 OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 DEBUGGER_URL = "http://127.0.0.1:9999/log"
 
 class ChatRequest(BaseModel):
-    model: str  # 模型名称，例如 deepseek-v4-flash, qwen2:7b 等
+    model: str  # 模型名称，例如 deepseek-v4-flash, gemini-3.5-flash, qwen2:7b 等
     messages: list
     file_paths: Optional[List[str]] = []  # 接收绑定的本地绝对路径列表
     web_search: Optional[str] = "off"     # 支持三态值: "off" | "direct" | "agent"
+    provider: Optional[str] = None        # 前端透传的提供商，如 "deepseek", "gemini", "ollama"
 
 # ================= 开发者助手非阻塞广播函数 =================
 
@@ -190,20 +194,96 @@ async def get_ollama_tags():
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"无法连接 Ollama: {str(e)}")
 
-# ================= Ollama/OpenAI 兼容型单次会话底层调用器 =================
+# ================= Ollama/OpenAI/Gemini 统一底层调用器 =================
 
-async def call_llm_api(model: str, messages: list, is_deepseek_model: bool) -> tuple:
+async def call_llm_api(model: str, messages: list, provider: str) -> tuple:
     """
     统一底层大模型接口，并在调用前后向控制台调试器广播【发送完整上下文】与【大模型返回响应】。
     """
     # 🌟 1. 投递大模型即将被灌入的全部历史上下文
     await send_debug_log("LLM_CALL_PREPARED", {"messages": messages})
 
-    if is_deepseek_model:
-        if not api_key:
+    # ---- Gemini 官方 SDK 逻辑 ----
+    if provider == "gemini" or "gemini" in model.lower():
+        api_key_val = os.environ.get('GEMINI_API_KEY')
+        if not api_key_val:
+            raise HTTPException(status_code=500, detail="本地未检测到环境变量 GEMINI_API_KEY，请检查系统设置！")
+        try:
+            # 使用官方标准的 genai.Client 实例
+            client = genai.Client(api_key=api_key_val)
+            
+            # 使用最稳定、抗错性最高且支持多轮历史及 System Instructions 的 client.models.generate_content
+            # 我们将 messages 映射为标准的 Client.types.Content 格式
+            contents = []
+            
+            # 提取可能存在的 System 设定
+            system_instruction = None
+            system_msgs = [m for m in messages if m["role"] == "system"]
+            if system_msgs:
+                system_instruction = "\n".join([m["content"] for m in system_msgs])
+
+            for msg in messages:
+                if msg["role"] == "system":
+                    continue
+                
+                role_val = "user" if msg["role"] == "user" else "model"
+                parts_list = []
+                
+                # 处理多模态图片/音频
+                if isinstance(msg["content"], list):
+                    for part in msg["content"]:
+                        if part.get("type") == "text":
+                            parts_list.append(types.Part.from_text(text=part["text"]))
+                        elif part.get("type") == "image_url":
+                            img_url = part["image_url"]["url"]
+                            if ";base64," in img_url:
+                                header, data_b64 = img_url.split(";base64,")
+                                mime_type = header.split("data:")[-1]
+                                parts_list.append(types.Part.from_bytes(
+                                    data=base64.b64decode(data_b64),
+                                    mime_type=mime_type
+                                ))
+                else:
+                    parts_list.append(types.Part.from_text(text=msg["content"]))
+                
+                contents.append(types.Content(role=role_val, parts=parts_list))
+
+            # 统一配置块，规避 interactions 模块不匹配的问题
+            config = types.GenerateContentConfig(
+                system_instruction=system_instruction
+            ) if system_instruction else None
+
+            # 调用最基础也最标准的 generate_content 接口
+            response = client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config
+            )
+
+            ai_content = response.text or ""
+            usage_dict = {
+                "total_tokens": response.usage_metadata.total_token_count if response.usage_metadata else 0,
+                "prompt_tokens": response.usage_metadata.prompt_token_count if response.usage_metadata else 0,
+                "completion_tokens": response.usage_metadata.candidates_token_count if response.usage_metadata else 0
+            }
+
+            # 🌟 2. 投递返回的原生响应
+            await send_debug_log("LLM_RESPONSE_RECEIVED", {
+                "content": ai_content,
+                "usage": usage_dict
+            })
+            return ai_content, usage_dict
+
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Gemini 云端推理失败: {str(e)}")
+
+    # ---- DeepSeek 逻辑 ----
+    elif provider == "deepseek" or "deepseek" in model.lower():
+        api_key_val = os.environ.get('DEEPSEEK_API_KEY')
+        if not api_key_val:
             raise HTTPException(status_code=500, detail="本地未检测到环境变量 DEEPSEEK_API_KEY，请检查系统设置！")
         try:
-            client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+            client = OpenAI(api_key=api_key_val, base_url="https://api.deepseek.com")
             kwargs = {
                 "model": model,
                 "messages": messages,
@@ -225,8 +305,9 @@ async def call_llm_api(model: str, messages: list, is_deepseek_model: bool) -> t
             return ai_content, usage_dict
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"DeepSeek 云端推理失败: {str(e)}")
+
+    # ---- Ollama 本地调用逻辑 ----
     else:
-        # ---- Ollama 本地调用逻辑 ----
         async with httpx.AsyncClient() as client:
             try:
                 headers = {"Content-Type": "application/json"}
@@ -268,7 +349,16 @@ async def chat(request: ChatRequest):
         "web_search": request.web_search
     })
 
-    is_deepseek_model = "deepseek" in request.model.lower()
+    # 根据前端传过来的 provider 或者模型名称判定提供商
+    provider = request.provider or ""
+    if not provider:
+        if "deepseek" in request.model.lower():
+            provider = "deepseek"
+        elif "gemini" in request.model.lower():
+            provider = "gemini"
+        else:
+            provider = "ollama"
+
     text_context, multimodal_contents = process_file_paths(request.file_paths)
 
     processed_messages = []
@@ -384,8 +474,7 @@ async def chat(request: ChatRequest):
                     # 开始多轮 ReAct 思维循环
                     for agent_round in range(1, max_agent_rounds + 1):
                         # 🌟 3. 调用合并好的通用推理接口。
-                        # 它会在触发 LLM 推理的那一秒，在控制台中准确打印出【当时模型收到的全部上下文】，调试时序完美！
-                        ai_choice, current_usage = await call_llm_api(request.model, agent_context, is_deepseek_model)
+                        ai_choice, current_usage = await call_llm_api(request.model, agent_context, provider)
                         usage_dict = current_usage
                         
                         # 检测 AI 产生的生鲜 Output 中，是否输出了 [SEARCH: ] 指令
@@ -433,7 +522,7 @@ async def chat(request: ChatRequest):
                     # 达到上限时的防死循环防御
                     if match and agent_round == max_agent_rounds:
                         agent_context.append({"role": "user", "content": "您已达到检索上限（3轮），请直接结合已有的事实背景，为用户梳理、生成最完美的最终大Markdown解答。"})
-                        ai_content, final_usage = await call_llm_api(request.model, agent_context, is_deepseek_model)
+                        ai_content, final_usage = await call_llm_api(request.model, agent_context, provider)
                         usage_dict = final_usage
 
                     return {
@@ -452,7 +541,7 @@ async def chat(request: ChatRequest):
 
     # ================= 走常规云端或本地模型的推理发送逻辑 =================
     try:
-        ai_content, usage_dict = await call_llm_api(request.model, processed_messages, is_deepseek_model)
+        ai_content, usage_dict = await call_llm_api(request.model, processed_messages, provider)
         return {
             "content": ai_content,
             "usage": usage_dict,
