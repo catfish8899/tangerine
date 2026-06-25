@@ -124,11 +124,31 @@ def process_file_paths(file_paths: List[str]) -> tuple:
 async def select_files():
     pass
 
+@app.get("/api/ollama/status")
 async def get_ollama_status():
-    pass
+    """检测本地 Ollama 服务是否在线"""
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.get(OLLAMA_BASE_URL, timeout=2.0)
+            if res.status_code == 200:
+                return {"status": "online", "message": "Ollama is running"}
+            return {"status": "offline", "message": f"状态异常: HTTP {res.status_code}"}
+    except Exception as e:
+        return {"status": "offline", "message": str(e)}
 
+@app.get("/api/ollama/tags")
 async def get_ollama_tags():
-    pass
+    """获取本地 Ollama 已下载的模型列表"""
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5.0)
+            if res.status_code == 200:
+                data = res.json()
+                models = [m.get("name") for m in data.get("models", [])]
+                return {"status": "success", "models": models}
+            return {"status": "error", "message": f"状态异常: HTTP {res.status_code}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 # ================= 🚀 流式核心生成器与 LLM 客户端 =================
 
