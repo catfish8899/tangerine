@@ -1,3 +1,4 @@
+// src/types/chat.ts
 export interface Message {
   id: string;
   sender: "user" | "ai" | "system_err";
@@ -17,10 +18,19 @@ export interface Message {
   sources?: Array<{ title: string; url: string }>;
 }
 
+// 👇 修改：增加角色 ID 绑定支持
 export interface ChatSession {
   id: string;
   title: string;
   messages: Message[];
+  roleId?: string; // 👈 绑定到当前会话的角色 ID
+}
+
+// 👇 新增：角色系统提示词接口定义
+export interface Role {
+  id: string;
+  name: string;
+  systemPrompt: string;
 }
 
 export interface AttachmentFile {

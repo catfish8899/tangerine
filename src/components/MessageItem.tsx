@@ -1,4 +1,4 @@
-// src/components/MessageItem.tsx 的完整修改流式优化版
+// src/components/MessageItem.tsx 的完整修改流式优化版 (终极修复幽灵文本框与模型参数显示 Bug)
 import React, { useState } from "react";
 import { 
   ChevronLeft, 
@@ -66,17 +66,24 @@ export default function MessageItem({
     }
   };
 
-  // 💡 现代化交互语言判定：
-  // 如果是 AI 助手消息，且当前文字内容为空、且没有检索引用源、且非错误消息时，
-  // 我们在回答出第一个字之前，完全不贴出这个空框，防止页面过于突兀。
-  const isAiThinkingAndEmpty = msg.sender === 'ai' && !msg.text && (!msg.sources || msg.sources.length === 0);
-  if (isAiThinkingAndEmpty) {
-    return null; // 优雅地保持隐形，只展示下方的“正在思考...”状态
+  // 💡 现代化时序判定 1：
+  // 只有在【加载状态彻底结束】且【依然没有任何文本及引用信源】时，才判定为“幽灵空消息”并进行物理隐藏
+  const isMessageTrulyEmpty = msg.sender === 'ai' && !msg.text && (!msg.sources || msg.sources.length === 0) && !isParentLoading;
+  if (isMessageTrulyEmpty) {
+    return null; 
   }
 
-  // 💡 现代化时序判定：
-  // 底部大模型参数信息（提供商、模型、Token消耗、时间）只有在加载状态结束（或者已经非 Loading 状态）时才显示
-  const shouldShowMetadata = msg.sender === 'ai' && !msg.isEditing && !isParentLoading;
+  // 💡 现代化时序判定 2：
+  // 在加载思考中且内容还是空的时，判定为正在思考
+  const isCurrentlyThinking = msg.sender === 'ai' && !msg.text && isParentLoading;
+
+  // 💡 现代化时序判定 3：
+  // 只要大模型开始吐字（msg.text 不为空），文本框就需要立即显示（即使 isLoading 仍为 true）
+  const shouldShowMarkdown = msg.sender === 'ai' && msg.text;
+
+  // 💡 现代化时序判定 4：
+  // 只有在流式完全传输结束（isParentLoading 结束）之后，底部模型调用元数据才淡入显示
+  const shouldShowMetadata = msg.sender === 'ai' && !msg.isEditing && !isParentLoading && msg.text;
 
   return (
     <div className={`flex gap-4 ${isUser ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-200`}>
@@ -125,8 +132,20 @@ export default function MessageItem({
           ) : (
             <>
               {msg.sender === 'ai' ? (
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-2 min-w-[150px]">
                   
+                  {/* 【思考阶段】：完全没字时，展现小圆点呼吸思考提示，隐藏空的文本框 */}
+                  {isCurrentlyThinking && (
+                    <div className="flex items-center gap-2 text-xs text-amber-500/80 font-mono py-1 select-none animate-pulse">
+                      <div className="flex space-x-1 items-center">
+                        <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </div>
+                      <span className="text-[10px] tracking-wider ml-1">AI 正在深度思考并组织语言...</span>
+                    </div>
+                  )}
+
                   {/* 当 AI 返回了 sources 时，渲染 Fluent 风格的折叠检索轨迹 */}
                   {msg.sources && msg.sources.length > 0 && (
                     <div className="mb-2 border border-[#3d4a3e] bg-[#232b24]/50 rounded-lg p-2 text-xs text-[#a9d1b1] w-full font-sans shadow-sm select-none">
@@ -179,8 +198,11 @@ export default function MessageItem({
                     </div>
                   )}
 
-                  {/* 正常 Markdown 消息渲染 */}
-                  <MarkdownMessage text={msg.text} fontSize={chatFontSize} />
+                  {/* 【流式输出阶段】：只要有字（shouldShowMarkdown 为 true），MarkdownMessage 立即无障碍、非阻塞渲染展示 */}
+                  {shouldShowMarkdown && (
+                    <MarkdownMessage text={msg.text} fontSize={chatFontSize} />
+                  )}
+                  
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
@@ -222,9 +244,9 @@ export default function MessageItem({
           </div>
         )}
 
-        {/* 💡 现代化时序：生成完毕（不再 Loading）才显示底部的各种系统参数 */}
+        {/* 【元数据阶段】：流式加载彻底结束（isParentLoading 为 false）时，元数据平滑淡入呈现，避免流式打字期间文字抖动 */}
         {shouldShowMetadata && (
-          <div className="mt-1 pt-1.5 border-t border-white/5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-gray-500 font-mono select-none animate-in fade-in duration-300">
+          <div className="mt-1 pt-1.5 border-t border-white/5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-gray-500 font-mono select-none animate-in fade-in duration-500">
             <span>提供商: <strong className="text-gray-400 font-medium">{msg.provider || "未知"}</strong></span>
             <span className="opacity-30 text-[8px]">•</span>
             <span>模型: <strong className="text-gray-400 font-medium">{msg.model || "未知"}</strong></span>

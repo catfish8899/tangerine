@@ -1,4 +1,4 @@
-// src/components/Sidebar.tsx 的完整修改版
+// src/components/Sidebar.tsx
 import { 
   Plus, 
   Image as ImageIcon, 
@@ -26,7 +26,8 @@ interface SidebarProps {
   setActiveSessionId: (id: string) => void;
   onContextMenu: (e: React.MouseEvent, sessionId: string) => void;
   onCreateSession: () => void;
-  onOpenSettings: () => void; // 👈 新增：开启设置按钮回调
+  onOpenSettings: () => void; // 开启设置按钮回调
+  onOpenRoles: () => void;     // 👈 新增：开启角色设置菜单的回调
 }
 
 export default function Sidebar({
@@ -35,12 +36,13 @@ export default function Sidebar({
   setActiveSessionId,
   onContextMenu,
   onCreateSession,
-  onOpenSettings // 👈 接收回调参数
+  onOpenSettings,
+  onOpenRoles // 👈 接收角色回调
 }: SidebarProps) {
   return (
-    <div className="w-[260px] bg-[#181818] flex flex-col border-r border-[#2d2d2d] shrink-0 justify-between">
-      <div className="flex flex-col pt-4 px-3 overflow-hidden">
-        {/* 顶部标题区（已移除右上角的放大镜和设置/过滤图标） */}
+    <div className="w-[260px] bg-[#181818] flex flex-col border-r border-[#2d2d2d] shrink-0 justify-between select-none">
+      <div className="flex flex-col pt-4 px-3 overflow-hidden flex-1">
+        {/* 顶部标题区 */}
         <div className="flex items-center justify-between px-2 mb-4 shrink-0">
           <span className="text-xs text-gray-400 font-semibold tracking-wider">聊天</span>
         </div>
@@ -84,7 +86,11 @@ export default function Sidebar({
         </div>
 
         <div className="space-y-1 text-xs text-gray-400 pt-2 border-t border-[#252525]">
-          <div className="flex items-center gap-2.5 px-3 py-2 rounded hover:bg-[#252525] hover:text-white cursor-pointer transition-colors">
+          {/* 👇 我的角色 绑定点击事件 */}
+          <div 
+            onClick={onOpenRoles}
+            className="flex items-center gap-2.5 px-3 py-2 rounded hover:bg-[#252525] hover:text-white cursor-pointer transition-colors"
+          >
             <UserSquare2 size={15} />
             <span>我的角色</span>
           </div>
@@ -93,7 +99,7 @@ export default function Sidebar({
             <HelpCircle size={15} />
             <span>我的文件</span>
           </div>
-          {/* 设置按钮 👈 绑定点击事件 */}
+          {/* 设置按钮 */}
           <div 
             onClick={onOpenSettings} 
             className="flex items-center gap-2.5 px-3 py-2 rounded hover:bg-[#252525] hover:text-white cursor-pointer transition-colors"

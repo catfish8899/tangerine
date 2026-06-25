@@ -1,4 +1,4 @@
-tangerine 桌面 AI 助手 - 阶段性开发说明书 (流式流转解耦版)
+tangerine 桌面 AI 助手 - 阶段性开发说明书 (流式流转解耦 & 角色系统版)
 本项目是一款基于 Windows 11 Fluent Design（暗黑微光风格）的 AI 智能聊天客户端。应用后端使用 Rust (Tauri 2.0) 管理窗口及生命周期，并通过本地 Python Sidecar 服务桥接调用云端 DeepSeek/Gemini API 及本地 Ollama 服务，确保 API 密钥的安全性和本地扩展能力。
 
 一、 技术栈组成 & 新增前端依赖
@@ -25,15 +25,21 @@ pnpm add react-markdown remark-gfm rehype-highlight highlight.js
 二、 核心功能与架构升级说明
 1. SSE (Server-Sent Events) 流式传输架构：
    后端 FastAPI 路由 `/chat` 统一改造为返回 `StreamingResponse` (基于 `text/event-stream` 协议)。
-   前端摒弃了原有的阻塞式 `axios`/`fetch` 响应，改用原生的 `fetch` 获取 `response.body.getReader()`。通过自定义 decoder 逐包解析以 `data: ` 开头的流式数据并向 React 状态机进行高频追加更新，实现丝滑、低延迟的流式打字机效果。
+   前端优化了原生 `fetch` 流式数据解析器，加入了高度兼容的 `extractTextDelta` 提取管道，支持 `choices.delta.content`、自定义 `text` 字段、`message.content` 等多格式多端混吐解析，解决打字机不出字或幽灵空框的痛点。
 
-2. 本地 Ollama 通道高抗错改造：
+2. 角色系统与提示词隔离设计（新增）：
+   - 磨砂半透明控制面板：采用 Fluent Design 的 `backdrop-blur-md` 磨砂高光风格，铺满软件界面。支持卡片化编辑、创建与物理删除自定义系统提示词。
+   - 唯一性重名校验：在卡片编辑保存时，启动多轮不重名断言，从前端规避同名角色数据污染。
+   - 对话生命周期绑定：遵循“只能在空白会话中选择角色”的严格交互规则。对话一旦产生内容，选择器即时隐藏；已选中的角色卡片会以微光 System 气泡常驻展示在消息视窗最顶部，以便用户随时掌控当前 AI 的心智状态。
+   - 提示词安全解耦：仅将会话绑定的自定义系统提示词通过 API 的 `system` 消息通道送达大模型。联网、工具组装等临时提示词绝不污染展示区的角色 System 气泡，保证展示纯粹性。
+
+3. 本地 Ollama 通道高抗错改造：
    为彻底解决本地模型偶尔不吐字及多电脑环境下连接不稳定的问题，后端 Ollama 流式链路升级为直接使用标准的 `OpenAI` SDK 直连本地 `11434` 端口的 `/v1` 兼容网关，抹平了底层 SSE 字符缓冲差异，实现了 100% 稳定的流式输出。
 
-3. 熔断防御机制（消灭幽灵消息）：
+4. 熔断防御机制（消灭幽灵消息）：
    前端专门建立了流式熔断控制（Try-Catch Stream Breaker）。当云端接口、网络环境或本地 Ollama 服务在流式建立及握手阶段抛出异常时，前端立即熔断并在内存及 LocalStorage 中彻底“抹杀”刚才为了等待流式而创建的空临时 AI 占位消息，并在下方追加带有清晰提示的 `system_err` 系统报错气泡。这完美保护了 `[User-AI]` 的严格交替对话逻辑。
 
-4. 现代化微光交互语言：
+5. 现代化微光交互语言：
    - 思考状态自动渐隐：点击发送后仅显示“模型正在思考中...”提示；一旦模型吐出第一个字符或展现联网检索轨迹（出字瞬间），提示气泡立即消失，避免空间重叠与无谓抖动。
    - 气泡隐入：在回答出第一个字符之前，AI 空文本框完全隐形。
    - 属性淡入：大模型底部的提供商、模型名称、Token 消耗、响应时间等系统专业 Metadata 只有在整个流式加载完成（isLoading 结束）后，才会整齐、优雅地淡入显示。
@@ -51,11 +57,12 @@ tangerine/
 │   │   ├── MarkdownMessage.tsx    # Markdown 解析器：接收外部 fontSize，动态自适应行内代码、表格及多级标题比例，进行 Fluent 风格渲染
 │   │   ├── MessageItem.tsx        # [已修改] 消息渲染组件：配合全新流式，未出字时空框隐形，加载时处于骨架动画。支持 Tavily 联网引用源（sources）的流畅解析与微光折叠抽屉展现实时轨迹。仅在加载完全结束后才淡入呈现底部元数据参数，避免视觉冗余。
 │   │   ├── ChatInput.tsx          # 底部输入组件：包含附件预览栏、输入框、添加附件按钮、混合模型下拉选择器。优雅区分云端/本地模型分类并配备状态指示圆点。
-│   │   ├── Sidebar.tsx            # 侧边栏：管理聊天历史切换、右键菜单、新建会话以及跳转“设置”
-│   │   └── SettingsModal.tsx      # 设置面板：重构为多 Tab 导航（“云端模型设置”、“本地模型设置”和“对话格式设置”）。支持本地 Ollama 状态检测与模型一键同步，避免云/本配置 physical 挤占。
+│   │   ├── Sidebar.tsx            # [已修改] 侧边栏：管理聊天历史切换、右键菜单、新建会话以及跳转“设置”、点击“我的角色”一键调出设定菜单
+│   │   ├── SettingsModal.tsx      # 设置面板：重构为多 Tab 导航（“云端模型设置”、“本地模型设置”和“对话格式设置”）。支持本地 Ollama 状态检测与模型一键同步，避免云/本配置 physical 挤占。
+│   │   └── RolesModal.tsx         # [新创建] 角色设置菜单：磨砂半透明背景全覆盖卡片系统，执行重复名称校验，实现本地 LocalStorage 状态自闭环持久化。
 │   ├── types/                     # [类型目录]
-│   │   └── chat.ts                # 类型声明文件：承载 Session、Message、Attachment 类型定义与文件类型/时间处理辅助函数。
-│   ├── App.tsx                    # [已修改] 主界面组件：核心控制台。已重构为全 SSE 读取。加入了流式死锁阻断器、熔断保护擦除。修复了 SettingsModal 传参缺失及 React 状态更新方法错误，确保 TypeScript 强类型无缝构建通过。
+│   │   └── chat.ts                # [已修改] 类型声明文件：新增 Role 角色接口规范，并在 ChatSession 中拓展 roleId 用于指针关联。
+│   ├── App.tsx                    # [已修改] 主界面组件：核心控制台。已重构为高容错 SSE 解析器。内置不可变引用更新状态机防止 React 页面失弹，支持新对话快速角色选取与顶部常驻 System 指令设定气泡显示。
 │   ├── index.css                  # Tailwind v4 规范升级：引入 @import "tailwindcss" 并声明 @source 自定义扫描源
 │   ├── main.tsx                   # 前端入口文件：引入 React、App 组件并加载 index.css、highlight.js/styles/atom-one-dark.css
 │   └── vite-env.d.ts              # Vite 环境变量类型定义
@@ -89,7 +96,7 @@ Python 3：确保 python 已添加到系统环境变量 PATH 中。
   - `DEEPSEEK_API_KEY`：云端 DeepSeek 推理秘钥。
   - `GEMINI_API_KEY`：云端 Gemini 推理密钥。
   - `TAVILY_API_KEY`：Tavily 联网搜索 API 密钥。
-本地服务（可选）：若要启用离线 AI，建议安装本地 Ollama 并拉取相应模型。
+本地 service（可选）：若要启用离线 AI，建议安装本地 Ollama 并拉取相应模型。
 
 2. 跨电脑克隆后的快速启动步骤
 在新电脑上克隆仓库后，只需在项目根目录下依次执行以下命令：
