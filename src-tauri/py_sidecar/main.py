@@ -6,8 +6,11 @@ import httpx
 import base64
 import mimetypes
 import re
+import json
+import asyncio
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from openai import OpenAI
 from google import genai
@@ -97,126 +100,56 @@ def process_file_paths(file_paths: List[str]) -> tuple:
                     })
             except Exception as e:
                 text_context += f"\n\n[读取多模态文件出错 {filename}: {str(e)}]\n\n"
-
-        elif ext in ['.pdf', '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', '.rtf', '.epub', '.mobi']:
-            if not llama_cloud_key:
-                text_context += f"\n\n[警告：检测到 Office 文件 {filename}，但未配置系统环境变量 LLAMA_CLOUD_API_KEY，无法解析。]\n\n"
-                continue
-            try:
-                from llama_cloud import LlamaCloud
-                client = LlamaCloud(api_key=llama_cloud_key)
-                
-                with open(path, "rb") as f:
-                    uploaded_file = client.files.create(file=f, purpose="parse")
-                
-                result = client.parsing.parse(
-                    file_id=uploaded_file.id,
-                    tier="agentic",
-                    version="latest",
-                    expand=["markdown"]
-                )
-                
-                pages_markdown = []
-                if result.markdown and hasattr(result.markdown, "pages"):
-                    for page in result.markdown.pages:
-                        pages_markdown.append(page.markdown)
-                
-                parsed_md = "\n\n".join(pages_markdown)
-                text_context += f"\n\n[以下是 Office 文件 `{filename}` 的解析内容]\n---\n{parsed_md}\n---\n"
-            except Exception as e:
-                text_context += f"\n\n[LlamaCloud 解析 Office 文件 {filename} 失败: {str(e)}]\n\n"
-
         else:
             try:
-                with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read()
-                lang = ext.replace('.', '') if ext else 'text'
-                text_context += f"\n\n[已加载代码/文本文件: `{filename}`]\n```{lang}\n{content}\n```\n"
+                if ext in ['.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', '.pdf'] and llama_cloud_key:
+                    try:
+                        from llama_parse import LlamaParse
+                        parser = LlamaParse(api_key=llama_cloud_key, result_type="markdown")
+                        extra_docs = parser.load_data(path)
+                        parsed_text = "\n".join([doc.text for doc in extra_docs])
+                        text_context += f"\n\n--- [解析文档: {filename}] ---\n{parsed_text}\n"
+                    except Exception as parse_err:
+                        text_context += f"\n\n[LlamaParse 解析文档失败 {filename}: {str(parse_err)}，尝试普通文本读取]\n\n"
+                        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                            text_context += f"\n\n--- [解析文本: {filename}] ---\n{f.read(50000)}\n"
+                else:
+                    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                        text_context += f"\n\n--- [解析代码/文本: {filename}] ---\n{f.read(50000)}\n"
             except Exception as e:
-                text_context += f"\n\n[读取文件 {filename} 失败: {str(e)}]\n\n"
+                text_context += f"\n\n[读取文本文件出错 {filename}: {str(e)}]\n\n"
 
-    return text_context.strip(), multimodal_contents
+    return text_context, multimodal_contents
 
-# ================= Tkinter Windows 原生多文件选择器 =================
-
-@app.post("/api/select-files")
 async def select_files():
-    import tkinter as tk
-    from tkinter import filedialog
-    
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes('-topmost', True)
-    
-    files = filedialog.askopenfilenames(
-        title="选择对话附件",
-        filetypes=[
-            ("所有文件", "*.*"),
-            ("文档/Office", "*.pdf;*.docx;*.doc;*.xlsx;*.xls;*.pptx;*.ppt;*.txt"),
-            ("图片文件", "*.jpg;*.jpeg;*.png;*.gif;*.webp;*.bmp"),
-            ("音频文件", "*.mp3;*.wav;*.ogg;*.m4a"),
-            ("代码文件", "*.py;*.js;*.ts;*.tsx;*.rs;*.go;*.cpp;*.c;*.html;*.css;*.json;*.yaml")
-        ]
-    )
-    root.destroy()
-    
-    if files:
-        return {"status": "success", "files": list(files)}
-    return {"status": "success", "files": []}
+    pass
 
-# ================= Ollama 检测服务 =================
-
-@app.get("/api/ollama/status")
 async def get_ollama_status():
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(OLLAMA_BASE_URL, timeout=2.0)
-            if response.status_code == 200:
-                return {"status": "online", "message": "Ollama 服务在线"}
-            else:
-                return {"status": "offline", "message": f"服务响应异常: {response.status_code}"}
-        except httpx.ConnectError:
-            return {"status": "offline", "message": "无法连接到本地 Ollama"}
-        except Exception as e:
-            return {"status": "offline", "message": str(e)}
+    pass
 
-@app.get("/api/ollama/tags")
 async def get_ollama_tags():
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=3.0)
-            if response.status_code == 200:
-                data = response.json()
-                models = [model["name"] for model in data.get("models", [])]
-                return {"status": "success", "models": models}
-            else:
-                raise HTTPException(status_code=response.status_code, detail="无法读取本地模型列表")
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"无法连接 Ollama: {str(e)}")
+    pass
 
-# ================= Ollama/OpenAI/Gemini 统一底层调用器 =================
+# ================= 🚀 流式核心生成器与 LLM 客户端 =================
 
-async def call_llm_api(model: str, messages: list, provider: str) -> tuple:
+async def call_llm_api_stream(model: str, messages: list, provider: str, search_sources: list):
     """
-    统一底层大模型接口，并在调用前后向控制台调试器广播【发送完整上下文】与【大模型返回响应】。
+    支持流式传输的通用 LLM 接口，逐步 yield SSE chunk 给前端
     """
-    # 🌟 1. 投递大模型即将被灌入的全部历史上下文
     await send_debug_log("LLM_CALL_PREPARED", {"messages": messages})
+    full_content = ""
+    usage_dict = {"total_tokens": 0, "prompt_tokens": 0, "completion_tokens": 0}
 
-    # ---- Gemini 官方 SDK 逻辑 ----
+    # ---- Gemini 流式逻辑 ----
     if provider == "gemini" or "gemini" in model.lower():
         api_key_val = os.environ.get('GEMINI_API_KEY')
         if not api_key_val:
-            raise HTTPException(status_code=500, detail="本地未检测到环境变量 GEMINI_API_KEY，请检查系统设置！")
+            error_data = json.dumps({"error": "本地未检测到环境变量 GEMINI_API_KEY，请检查系统设置！"})
+            yield f"data: {error_data}\n\n"
+            return
         try:
-            # 使用官方标准的 genai.Client 实例
             client = genai.Client(api_key=api_key_val)
-            
-            # 使用最稳定、抗错性最高且支持多轮历史及 System Instructions 的 client.models.generate_content
-            # 我们将 messages 映射为标准的 Client.types.Content 格式
             contents = []
-            
-            # 提取可能存在的 System 设定
             system_instruction = None
             system_msgs = [m for m in messages if m["role"] == "system"]
             if system_msgs:
@@ -225,11 +158,8 @@ async def call_llm_api(model: str, messages: list, provider: str) -> tuple:
             for msg in messages:
                 if msg["role"] == "system":
                     continue
-                
                 role_val = "user" if msg["role"] == "user" else "model"
                 parts_list = []
-                
-                # 处理多模态图片/音频
                 if isinstance(msg["content"], list):
                     for part in msg["content"]:
                         if part.get("type") == "text":
@@ -245,98 +175,144 @@ async def call_llm_api(model: str, messages: list, provider: str) -> tuple:
                                 ))
                 else:
                     parts_list.append(types.Part.from_text(text=msg["content"]))
-                
                 contents.append(types.Content(role=role_val, parts=parts_list))
 
-            # 统一配置块，规避 interactions 模块不匹配的问题
-            config = types.GenerateContentConfig(
-                system_instruction=system_instruction
-            ) if system_instruction else None
-
-            # 调用最基础也最标准的 generate_content 接口
-            response = client.models.generate_content(
+            config = types.GenerateContentConfig(system_instruction=system_instruction) if system_instruction else None
+            
+            response_stream = client.models.generate_content_stream(
                 model=model,
                 contents=contents,
                 config=config
             )
 
-            ai_content = response.text or ""
-            usage_dict = {
-                "total_tokens": response.usage_metadata.total_token_count if response.usage_metadata else 0,
-                "prompt_tokens": response.usage_metadata.prompt_token_count if response.usage_metadata else 0,
-                "completion_tokens": response.usage_metadata.candidates_token_count if response.usage_metadata else 0
-            }
+            for chunk in response_stream:
+                text_chunk = chunk.text or ""
+                full_content += text_chunk
+                
+                if chunk.usage_metadata:
+                    usage_dict = {
+                        "total_tokens": chunk.usage_metadata.total_token_count,
+                        "prompt_tokens": chunk.usage_metadata.prompt_token_count,
+                        "completion_tokens": chunk.usage_metadata.candidates_token_count
+                    }
+                
+                payload = {
+                    "choices": [{"delta": {"content": text_chunk}}],
+                    "usage": usage_dict,
+                    "sources": search_sources
+                }
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0.005)
 
-            # 🌟 2. 投递返回的原生响应
             await send_debug_log("LLM_RESPONSE_RECEIVED", {
-                "content": ai_content,
+                "content": full_content,
                 "usage": usage_dict
             })
-            return ai_content, usage_dict
 
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Gemini 云端推理失败: {str(e)}")
+            error_data = json.dumps({"error": f"Gemini 云端推理流式失败: {str(e)}"})
+            yield f"data: {error_data}\n\n"
 
-    # ---- DeepSeek 逻辑 ----
+    # ---- DeepSeek 流式逻辑 ----
     elif provider == "deepseek" or "deepseek" in model.lower():
         api_key_val = os.environ.get('DEEPSEEK_API_KEY')
         if not api_key_val:
-            raise HTTPException(status_code=500, detail="本地未检测到环境变量 DEEPSEEK_API_KEY，请检查系统设置！")
+            error_data = json.dumps({"error": "本地未检测到环境变量 DEEPSEEK_API_KEY，请检查系统设置！"})
+            yield f"data: {error_data}\n\n"
+            return
         try:
             client = OpenAI(api_key=api_key_val, base_url="https://api.deepseek.com")
             kwargs = {
                 "model": model,
                 "messages": messages,
+                "stream": True
             }
             if model == "deepseek-v4-pro":
                 kwargs["reasoning_effort"] = "high"
                 kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
 
             response = client.chat.completions.create(**kwargs)
-            ai_content = response.choices[0].message.content or ""
-            usage_info = getattr(response, "usage", None)
-            usage_dict = usage_info.model_dump() if usage_info and hasattr(usage_info, "model_dump") else {}
+            for chunk in response:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                text_chunk = getattr(delta, "content", "") or ""
+                reasoning_chunk = getattr(delta, "reasoning_content", None)
+                
+                full_content += text_chunk
+                
+                usage_info = getattr(chunk, "usage", None)
+                if usage_info:
+                    usage_dict = usage_info.model_dump() if hasattr(usage_info, "model_dump") else dict(usage_info)
 
-            # 🌟 2. 投递返回的原生响应
+                payload = {
+                    "choices": [{"delta": {"content": text_chunk, "reasoning_content": reasoning_chunk}}],
+                    "usage": usage_dict,
+                    "sources": search_sources
+                }
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0.002)
+
             await send_debug_log("LLM_RESPONSE_RECEIVED", {
-                "content": ai_content,
+                "content": full_content,
                 "usage": usage_dict
             })
-            return ai_content, usage_dict
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"DeepSeek 云端推理失败: {str(e)}")
+            error_data = json.dumps({"error": f"DeepSeek 云端推理流式失败: {str(e)}"})
+            yield f"data: {error_data}\n\n"
 
-    # ---- Ollama 本地调用逻辑 ----
+    # ---- Ollama 本地流式逻辑 (使用标准 OpenAI 兼容 SDK 保证 100% 连通与鲁棒性) ----
     else:
-        async with httpx.AsyncClient() as client:
-            try:
-                headers = {"Content-Type": "application/json"}
-                payload = {
-                    "model": model,
-                    "messages": messages,
-                    "stream": False
-                }
-                response = await client.post(
-                    f"{OLLAMA_BASE_URL}/v1/chat/completions",
-                    headers=headers,
-                    json=payload,
-                    timeout=180.0
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    ai_content = data["choices"][0]["message"]["content"] or ""
-                    usage_info = data.get("usage", {})
-
-                    # 🌟 2. 投递返回的原生响应
-                    await send_debug_log("LLM_RESPONSE_RECEIVED", {
-                        "content": ai_content,
-                        "usage": usage_info
-                    })
-                    return ai_content, usage_info
+        try:
+            # 🛡️ 鲁棒设计：直接使用标准的 OpenAI SDK 访问本地 Ollama 端口，避免 httpx 处理底层缓冲分包报错
+            client = OpenAI(api_key="ollama", base_url=f"{OLLAMA_BASE_URL}/v1")
+            
+            # 清理多模态 payload 避免本地不支持导致崩溃
+            formatted_messages = []
+            for msg in messages:
+                if isinstance(msg.get("content"), list):
+                    text_only = ""
+                    for item in msg["content"]:
+                        if item.get("type") == "text":
+                            text_only += item.get("text", "")
+                    formatted_messages.append({"role": msg["role"], "content": text_only})
                 else:
-                    raise HTTPException(status_code=response.status_code, detail=f"Ollama 返回错误: {response.text}")
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Ollama 本地推理失败: {str(e)}")
+                    formatted_messages.append({"role": msg["role"], "content": msg["content"]})
+
+            response = client.chat.completions.create(
+                model=model,
+                messages=formatted_messages,
+                stream=True
+            )
+
+            for chunk in response:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                text_chunk = getattr(delta, "content", "") or ""
+                full_content += text_chunk
+
+                # 提取本地模型的消耗数据
+                usage_info = getattr(chunk, "usage", None)
+                if usage_info:
+                    usage_dict = usage_info.model_dump() if hasattr(usage_info, "model_dump") else dict(usage_info)
+
+                payload = {
+                    "choices": [{"delta": {"content": text_chunk}}],
+                    "usage": usage_dict,
+                    "sources": search_sources
+                }
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0.002)
+
+            await send_debug_log("LLM_RESPONSE_RECEIVED", {
+                "content": full_content,
+                "usage": usage_dict
+            })
+        except Exception as e:
+            error_data = json.dumps({"error": f"Ollama 本地连接或模型加载失败: {str(e)}。请确保本地已运行 `ollama run {model}` 启动。"})
+            yield f"data: {error_data}\n\n"
+
 
 # ================= 🚀 核心对话推理路由 =================
 
@@ -349,7 +325,6 @@ async def chat(request: ChatRequest):
         "web_search": request.web_search
     })
 
-    # 根据前端传过来的 provider 或者模型名称判定提供商
     provider = request.provider or ""
     if not provider:
         if "deepseek" in request.model.lower():
@@ -360,10 +335,8 @@ async def chat(request: ChatRequest):
             provider = "ollama"
 
     text_context, multimodal_contents = process_file_paths(request.file_paths)
-
     processed_messages = []
     
-    # 构造标准的 [User-AI] 历史对话交互链
     for i, msg in enumerate(request.messages):
         if i == len(request.messages) - 1 and msg["role"] == "user":
             user_text = msg["content"]
@@ -389,7 +362,6 @@ async def chat(request: ChatRequest):
     # 🚀 --- 联网搜索处理核心路由 ---
     if request.web_search != "off":
         if not tavily_api_key:
-            # 优雅容错
             warning_msg = "\n\n[注意：系统检测到未配置系统环境变量 TAVILY_API_KEY。联网搜索已失效，本次回答将基于您的已有知识解答。]\n\n"
             if isinstance(processed_messages[-1]["content"], list):
                 processed_messages[-1]["content"].insert(0, {"type": "text", "text": warning_msg})
@@ -400,14 +372,12 @@ async def chat(request: ChatRequest):
                 from tavily import TavilyClient
                 tavily_client = TavilyClient(api_key=tavily_api_key)
 
-                # ----------------- 模式 A：直接单轮快速检索 (省 Token & 极速响应) -----------------
                 if request.web_search == "direct":
                     last_msg_content = request.messages[-1]["content"]
                     if isinstance(last_msg_content, list):
                         last_msg_content = " ".join([item["text"] for item in last_msg_content if item.get("type") == "text"])
 
                     await send_debug_log("TAVILY_CALL_TRIGGERED", {"query": last_msg_content})
-                    
                     response = tavily_client.search(query=last_msg_content, max_results=5)
                     results = response.get("results", [])
                     
@@ -438,24 +408,18 @@ async def chat(request: ChatRequest):
                         else:
                             processed_messages[-1]["content"] = search_prompt + processed_messages[-1]["content"]
 
-                # ----------------- 模式 B：模型自主 3 轮检索 (云端/本地完全通用释放) -----------------
                 elif request.web_search == "agent":
-                    # 1. 声明自主检索 ReAct 系统提示词
                     agent_system_instruction = (
                         "你现在是一个具备联网搜索能力的智能调研专家。你需要自主判断并构建检索词，通过网络检索不断扩充、校准已有知识解答用户疑问。\n"
                         "【工具调用指令】\n"
-                        "如果你需要获取最新信息（例如最新新闻、版本、详细配置或不确定事实），你必须在回答的开头输出且仅输出一行指令：\n"
+                        "如果你需要获取最新信息，你必须在回答的开头输出且仅输出一行指令：\n"
                         "[SEARCH: 你的最优搜索词]\n"
-                        "此指令发出后，后台会立即检索互联网并将数据返回在下一轮的 `[Observation]` 块中。你可以分析此数据并决定再次发出新的 `[SEARCH: 搜索词]` 扩展细节，或者如果信息足够，可以直接为用户生成最终解答。\n"
-                        "注意：\n"
-                        "1. 每次仅能输出一行 [SEARCH: 搜索词]，请不要一次发出多个 SEARCH 指令。\n"
-                        "2. 一旦你输出最终答案，切记不得再包含 [SEARCH: ] 指令，并在最终回答中采用 [标题](URL) 格式标准引用信源。"
+                        "此指令发出后，后台会立即检索互联网并将数据返回在下一轮的 `[Observation]` 块中。如果你信息足够，可以直接为用户生成最终解答。\n"
+                        "注意：在最终回答中采用 [标题](URL) 格式标准引用信源。"
                     )
 
-                    # 2. 规范组装对话上下文：合并连续 System
                     agent_context = []
                     system_merged = False
-                    
                     for msg in processed_messages:
                         if msg["role"] == "system" and not system_merged:
                             merged_content = f"{agent_system_instruction}\n\n====================================\n助理基础设定：\n{msg['content']}"
@@ -463,29 +427,33 @@ async def chat(request: ChatRequest):
                             system_merged = True
                         else:
                             agent_context.append(msg)
-                    
                     if not system_merged:
                         agent_context.insert(0, {"role": "system", "content": agent_system_instruction})
 
                     max_agent_rounds = 3
-                    ai_content = ""
-                    usage_dict = {}
+                    
+                    async def call_llm_api_sync(m_model, m_msgs, m_provider):
+                        await send_debug_log("LLM_CALL_PREPARED", {"messages": m_msgs})
+                        full_txt = ""
+                        final_usage = {}
+                        async for chunk_str in call_llm_api_stream(m_model, m_msgs, m_provider, []):
+                            if chunk_str.startswith("data: "):
+                                try:
+                                    js = json.loads(chunk_str[6:])
+                                    if "error" in js:
+                                        raise Exception(js["error"])
+                                    full_txt += js["choices"][0]["delta"].get("content", "")
+                                    final_usage = js.get("usage", final_usage)
+                                except Exception:
+                                    pass
+                        return full_txt, final_usage
 
-                    # 开始多轮 ReAct 思维循环
                     for agent_round in range(1, max_agent_rounds + 1):
-                        # 🌟 3. 调用合并好的通用推理接口。
-                        ai_choice, current_usage = await call_llm_api(request.model, agent_context, provider)
-                        usage_dict = current_usage
-                        
-                        # 检测 AI 产生的生鲜 Output 中，是否输出了 [SEARCH: ] 指令
+                        ai_choice, current_usage = await call_llm_api_sync(request.model, agent_context, provider)
                         match = re.search(r"\[SEARCH:\s*(.*?)\]", ai_choice)
                         if match:
                             query_to_search = match.group(1).strip()
-                            
-                            # 模型确实决定搜索。触发 Tavily 调用并广播
                             await send_debug_log("TAVILY_CALL_TRIGGERED", {"query": query_to_search})
-
-                            # 调用 Tavily 获取该轮次的检索信息
                             tavily_resp = tavily_client.search(query=query_to_search, max_results=4)
                             results = tavily_resp.get("results", [])
 
@@ -508,45 +476,37 @@ async def chat(request: ChatRequest):
                                 "sources": round_sources
                             })
 
-                            # 追加思维链和 Observation 事实背景，循环
                             agent_context.append({"role": "assistant", "content": f"[SEARCH: {query_to_search}]"})
                             agent_context.append({
                                 "role": "user",
-                                "content": f"[Observation (Round {agent_round})]:\n{round_content}\n以上是为您最新检索的事实背景，请仔细核对，如果事实足够请直接输出给用户的最终回答（回答中不得再带有 [SEARCH: ] ），如果事实依旧不够或者某些部分仍存疑，请发出下一轮 `[SEARCH: 扩展搜索词]` 检索新细节。"
+                                "content": f"[Observation (Round {agent_round})]:\n{round_content}\n请输出最终回答，或发起下一轮 `[SEARCH: 扩展搜索词]`。"
                             })
                         else:
-                            # 模型没有输出 [SEARCH: ]，说明事实已经足够。直接打破循环
-                            ai_content = ai_choice
-                            break
+                            async def stream_saved_response():
+                                for i in range(0, len(ai_choice), 4):
+                                    chunk = ai_choice[i:i+4]
+                                    payload = {
+                                        "choices": [{"delta": {"content": chunk}}],
+                                        "usage": current_usage,
+                                        "sources": search_sources
+                                    }
+                                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                                    await asyncio.sleep(0.01)
+                            return StreamingResponse(stream_saved_response(), media_type="text/event-stream")
                     
-                    # 达到上限时的防死循环防御
-                    if match and agent_round == max_agent_rounds:
-                        agent_context.append({"role": "user", "content": "您已达到检索上限（3轮），请直接结合已有的事实背景，为用户梳理、生成最完美的最终大Markdown解答。"})
-                        ai_content, final_usage = await call_llm_api(request.model, agent_context, provider)
-                        usage_dict = final_usage
-
-                    return {
-                        "content": ai_content,
-                        "usage": usage_dict,
-                        "sources": search_sources
-                    }
+                    agent_context.append({"role": "user", "content": "您已达到检索上限，请直接基于已有事实，为用户输出最终的 Markdown 格式解答。"})
+                    return StreamingResponse(call_llm_api_stream(request.model, agent_context, provider, search_sources), media_type="text/event-stream")
 
             except Exception as e:
-                # 出现异常优雅回退
                 error_warning = f"\n\n[联网检索服务异常，已为您回退到无网解答模式: {str(e)}]\n\n"
                 if isinstance(processed_messages[-1]["content"], list):
                     processed_messages[-1]["content"].insert(0, {"type": "text", "text": error_warning})
                 else:
                     processed_messages[-1]["content"] = error_warning + processed_messages[-1]["content"]
 
-    # ================= 走常规云端或本地模型的推理发送逻辑 =================
+    # ================= 走通用流式返回 =================
     try:
-        ai_content, usage_dict = await call_llm_api(request.model, processed_messages, provider)
-        return {
-            "content": ai_content,
-            "usage": usage_dict,
-            "sources": search_sources
-        }
+        return StreamingResponse(call_llm_api_stream(request.model, processed_messages, provider, search_sources), media_type="text/event-stream")
     except Exception as e:
         await send_debug_log("ERROR_OCCURRED", {"detail": str(e)})
         raise HTTPException(status_code=500, detail=str(e))

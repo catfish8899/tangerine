@@ -1,4 +1,4 @@
-// src/App.tsx 的完整修改解耦版
+// src/App.tsx 的完整修改解耦流式防御版
 import { useState, useRef, useEffect } from "react";
 import { 
   Loader,
@@ -43,14 +43,28 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
   
-  // 👇 改为三态网络搜索控制: 'off' | 'direct' | 'agent'
   const [webSearchMode, setWebSearchMode] = useState<'off' | 'direct' | 'agent'>('off');
 
   const [chatFontSize, setChatFontSize] = useState<string>(() => {
     return localStorage.getItem(FONT_SIZE_STORAGE_KEY) || "12px";
   });
 
-  // 侧边栏对话删除菜单
+  useEffect(() => {
+    const handleStorageChange = () => {
+      const savedSize = localStorage.getItem(FONT_SIZE_STORAGE_KEY);
+      if (savedSize) setChatFontSize(savedSize);
+    };
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, []);
+
+  useEffect(() => {
+    if (!showSettings) {
+      const savedSize = localStorage.getItem(FONT_SIZE_STORAGE_KEY);
+      if (savedSize) setChatFontSize(savedSize);
+    }
+  }, [showSettings]);
+
   const [contextMenu, setContextMenu] = useState<{
     visible: boolean;
     x: number;
@@ -58,7 +72,6 @@ export default function App() {
     targetSessionId: string | null;
   }>({ visible: false, x: 0, y: 0, targetSessionId: null });
 
-  // 对话气泡右键多功能菜单
   const [msgContextMenu, setMsgContextMenu] = useState<{
     visible: boolean;
     x: number;
@@ -75,7 +88,6 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
   }, [sessions]);
 
-  // 根据当前选中的模型自动推导提供商（Provider）
   const getProviderByModel = (model: string): string => {
     const lowerModel = model.toLowerCase();
     if (lowerModel.includes("gemini")) return "gemini";
@@ -105,55 +117,38 @@ export default function App() {
 
   useEffect(() => {
     syncModelsFromSettings();
-
-    const handleGlobalClick = () => {
-      setContextMenu(prev => ({ ...prev, visible: false }));
-      setMsgContextMenu(prev => ({ ...prev, visible: false }));
-      setShowModelDropdown(false);
-    };
-    
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setShowSettings(false);
-      }
-    };
-
-    const handleFontSizeChange = () => {
-      const size = localStorage.getItem(FONT_SIZE_STORAGE_KEY) || "12px";
-      setChatFontSize(size);
-    };
-
-    const handleSettingsChange = () => {
-      syncModelsFromSettings();
-    };
-
-    window.addEventListener("click", handleGlobalClick);
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("storage_font_size_changed", handleFontSizeChange);
-    window.addEventListener("tangerine_api_settings_changed", handleSettingsChange);
-    return () => {
-      window.removeEventListener("click", handleGlobalClick);
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("storage_font_size_changed", handleFontSizeChange);
-      window.removeEventListener("tangerine_api_settings_changed", handleSettingsChange);
-    };
-  }, [selectedModel]);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+  }, [showSettings]);
 
   useEffect(() => {
-    const currentCount = activeSession?.messages?.length || 0;
-    if (currentCount > prevMessagesCountRef.current || isLoading) {
-      scrollToBottom();
+    const currentMessagesCount = activeSession?.messages?.length || 0;
+    if (currentMessagesCount > prevMessagesCountRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-    prevMessagesCountRef.current = currentCount;
-  }, [activeSession?.messages?.length, isLoading]);
+    prevMessagesCountRef.current = currentMessagesCount;
+  }, [activeSession?.messages?.length]);
+
+  const validateAlternatingOrder = (messages: Message[]): boolean => {
+    const filtered = messages.filter(m => m.sender !== "system_err");
+    for (let i = 0; i < filtered.length; i++) {
+      const current = filtered[i].sender;
+      const expected = i % 2 === 0 ? "user" : "ai";
+      if (current !== expected) return false;
+    }
+    return true;
+  };
+
+  const handleCreateSession = () => {
+    const newSession: ChatSession = {
+      id: Date.now().toString(),
+      title: "新对话",
+      messages: []
+    };
+    setSessions(prev => [newSession, ...prev]);
+    setActiveSessionId(newSession.id);
+  };
 
   const handleContextMenu = (e: React.MouseEvent, sessionId: string) => {
     e.preventDefault();
-    e.stopPropagation();
     setContextMenu({
       visible: true,
       x: e.clientX,
@@ -164,7 +159,6 @@ export default function App() {
 
   const handleMsgContextMenu = (e: React.MouseEvent, messageId: string, sender: Message["sender"]) => {
     e.preventDefault();
-    e.stopPropagation();
     setMsgContextMenu({
       visible: true,
       x: e.clientX,
@@ -174,107 +168,59 @@ export default function App() {
     });
   };
 
-  const handleDeleteSession = (id: string) => {
-    if (sessions.length <= 1) {
-      const resetSession: ChatSession = { id: Date.now().toString(), title: "新对话", messages: [] };
-      setSessions([resetSession]);
-      setActiveSessionId(resetSession.id);
-      return;
-    }
-    const filtered = sessions.filter(s => s.id !== id);
-    setSessions(filtered);
-    if (activeSessionId === id) {
-      setActiveSessionId(filtered[0].id);
-    }
-  };
-
-  const handleDeleteMessage = (messageId: string) => {
-    setSessions(prev => prev.map(session => {
-      if (session.id === activeSessionId) {
-        return {
-          ...session,
-          messages: session.messages.filter(m => m.id !== messageId)
-        };
-      }
-      return session;
-    }));
-  };
-
-  const handleCreateSession = () => {
-    const newId = Date.now().toString();
-    setSessions(prev => [{ id: newId, title: "新对话", messages: [] }, ...prev]);
-    setActiveSessionId(newId);
-  };
-
-  const validateAlternatingOrder = (tempMessagesList: Message[]): boolean => {
-    const chatOnly = tempMessagesList.filter(m => m.sender !== "system_err");
-    if (chatOnly.length === 0) return true;
-    for (let i = 0; i < chatOnly.length; i++) {
-      const expectedSender = i % 2 === 0 ? "user" : "ai";
-      if (chatOnly[i].sender !== expectedSender) {
-        return false;
-      }
-    }
-    return true;
-  };
-
-  const handleStartEdit = (messageId: string) => {
-    setSessions(prev => prev.map(session => {
-      if (session.id === activeSessionId) {
-        return {
-          ...session,
-          messages: session.messages.map(m => m.id === messageId ? { ...m, isEditing: true } : m)
-        };
-      }
-      return session;
-    }));
-  };
-
   const handleSaveEdit = (messageId: string, newText: string) => {
-    setSessions(prev => prev.map(session => {
-      if (session.id === activeSessionId) {
-        return {
-          ...session,
-          messages: session.messages.map(m => m.id === messageId ? { ...m, text: newText, isEditing: false } : m)
-        };
+    setSessions(prev => prev.map(s => {
+      if (s.id === activeSessionId) {
+        const updatedMessages = s.messages.map(m => {
+          if (m.id === messageId) {
+            return { ...m, text: newText, isEditing: false };
+          }
+          return m;
+        });
+        return { ...s, messages: updatedMessages };
       }
-      return session;
+      return s;
     }));
   };
 
   const handleCancelEdit = (messageId: string) => {
-    setSessions(prev => prev.map(session => {
-      if (session.id === activeSessionId) {
-        return {
-          ...session,
-          messages: session.messages.map(m => m.id === messageId ? { ...m, isEditing: false } : m)
-        };
+    setSessions(prev => prev.map(s => {
+      if (s.id === activeSessionId) {
+        const updatedMessages = s.messages.map(m => {
+          if (m.id === messageId) {
+            return { ...m, isEditing: false };
+          }
+          return m;
+        });
+        return { ...s, messages: updatedMessages };
       }
-      return session;
+      return s;
     }));
   };
 
   const handleSelectFiles = async () => {
     try {
-      const response = await fetch("http://127.0.0.1:5678/api/select-files", {
-        method: "POST"
-      });
+      const response = await fetch("http://127.0.0.1:5678/select_files", { method: "POST" });
       if (response.ok) {
         const data = await response.json();
-        if (data.status === "success" && data.files) {
-          const newAttachments: AttachmentFile[] = data.files.map((filePath: string) => {
-            const name = filePath.split(/[/\\]/).pop() || filePath;
-            return {
-              name,
-              path: filePath,
-              type: getFileType(name)
-            };
-          });
-          setAttachments(prev => [...prev, ...newAttachments]);
-        }
+        const selectedPaths: string[] = data.file_paths || [];
+        const newAttachments: AttachmentFile[] = selectedPaths.map(p => {
+          const parts = p.split(/[\\/]/);
+          const name = parts[parts.length - 1] || "未命名文件";
+          return {
+            name,
+            path: p,
+            type: getFileType(name)
+          };
+        });
+        setAttachments(prev => {
+          const existingPaths = prev.map(a => a.path);
+          const filteredNew = newAttachments.filter(a => !existingPaths.includes(a.path));
+          return [...prev, ...filteredNew];
+        });
       }
-    } catch (err) {
-      console.error("通过 Python 选取文件失败:", err);
+    } catch (e) {
+      console.error("调用 Tauri 选择文件出错:", e);
     }
   };
 
@@ -328,6 +274,35 @@ export default function App() {
 
     setIsLoading(true);
 
+    const streamAiMessageId = (Date.now() + 1).toString();
+    const currentProvider = getProviderByModel(selectedModel);
+    
+    const initialAiResponse: Message = { 
+      id: streamAiMessageId, 
+      sender: "ai", 
+      text: "",
+      provider: currentProvider,
+      model: selectedModel,
+      timestamp: Date.now(),
+      sources: []
+    };
+
+    setSessions(prev => prev.map(s => {
+      if (s.id === activeSessionId) {
+        const updatedMessages = s.messages.map(m => {
+          if (m.id === messageId) {
+            const updatedBranches = m.branches ? [...m.branches] : [];
+            const activeIdx = m.activeBranchIndex ?? 0;
+            updatedBranches[activeIdx] = [initialAiResponse];
+            return { ...m, branches: updatedBranches };
+          }
+          return m;
+        });
+        return { ...s, messages: [...updatedMessages, initialAiResponse] };
+      }
+      return s;
+    }));
+
     try {
       const apiMessages = precedingMessages
         .filter(m => m.sender !== "system_err")
@@ -337,8 +312,6 @@ export default function App() {
         }));
 
       const filePathsToSend = targetMsg.filePaths || [];
-      // 👇 强制判定保障 Gemini 绝不错分到 Ollama 分支！
-      const currentProvider = getProviderByModel(selectedModel);
 
       const response = await fetch("http://127.0.0.1:5678/chat", {
         method: "POST",
@@ -348,7 +321,7 @@ export default function App() {
           provider: currentProvider,
           messages: [{ role: "system", content: "You are a helpful assistant" }, ...apiMessages],
           file_paths: filePathsToSend,
-          web_search: webSearchMode // 传递三态值：'off' | 'direct' | 'agent'
+          web_search: webSearchMode
         })
       });
 
@@ -357,42 +330,84 @@ export default function App() {
         throw new Error(errData.detail || "请求失败");
       }
 
-      const data = await response.json();
-      const tokensUsed = 
-        data.usage?.total_tokens ?? 
-        data.usage?.total_token ?? 
-        data.usage_metadata?.total_tokens ?? 
-        data.total_tokens ?? 
-        data.tokens_used ?? 
-        data.response?.usage?.total_tokens ??
-        undefined;
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
 
-      const aiResponse: Message = { 
-        id: (Date.now() + 1).toString(), 
-        sender: "ai", 
-        text: data.content,
-        provider: currentProvider,
-        model: selectedModel,
-        tokensUsed: tokensUsed,
-        timestamp: Date.now(),
-        sources: data.sources || [] // 存储联网引用源
-      };
+      if (!reader) {
+        throw new Error("流式数据读取器初始化失败！");
+      }
 
-      setSessions(prev => prev.map(s => {
-        if (s.id === activeSessionId) {
-          const updatedMessages = s.messages.map(m => {
-            if (m.id === messageId) {
-              const updatedBranches = m.branches ? [...m.branches] : [];
-              const activeIdx = m.activeBranchIndex ?? 0;
-              updatedBranches[activeIdx] = [aiResponse];
-              return { ...m, branches: updatedBranches };
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith("data: ")) continue;
+
+          const rawData = trimmed.slice(6).trim();
+          if (rawData === "[DONE]") {
+            break;
+          }
+
+          try {
+            const parsedData = JSON.parse(rawData);
+            if (parsedData.error) {
+              throw new Error(parsedData.error);
             }
-            return m;
-          });
-          return { ...s, messages: [...updatedMessages, aiResponse] };
+
+            const textDelta = parsedData.choices?.[0]?.delta?.content || "";
+            const sources = parsedData.sources || [];
+            const tokensUsed = 
+              parsedData.usage?.total_tokens ?? 
+              parsedData.usage?.total_token ?? 
+              undefined;
+
+            setSessions(prev => prev.map(s => {
+              if (s.id === activeSessionId) {
+                const updatedMessages = s.messages.map(m => {
+                  if (m.id === streamAiMessageId) {
+                    return {
+                      ...m,
+                      text: m.text + textDelta,
+                      sources: sources.length > 0 ? sources : m.sources,
+                      tokensUsed: tokensUsed !== undefined ? tokensUsed : m.tokensUsed
+                    };
+                  }
+                  if (m.id === messageId) {
+                    const updatedBranches = m.branches ? [...m.branches] : [];
+                    const activeIdx = m.activeBranchIndex ?? 0;
+                    const branchList = updatedBranches[activeIdx] || [];
+                    const updatedBranchList = branchList.map(bm => {
+                      if (bm.id === streamAiMessageId) {
+                        return {
+                          ...bm,
+                          text: bm.text + textDelta,
+                          sources: sources.length > 0 ? sources : bm.sources,
+                          tokensUsed: tokensUsed !== undefined ? tokensUsed : bm.tokensUsed
+                        };
+                      }
+                      return bm;
+                    });
+                    updatedBranches[activeIdx] = updatedBranchList;
+                    return { ...m, branches: updatedBranches };
+                  }
+                  return m;
+                });
+                return { ...s, messages: updatedMessages };
+              }
+              return s;
+            }));
+          } catch (e: any) {
+            console.error("解析流式行失败:", e);
+          }
         }
-        return s;
-      }));
+      }
 
     } catch (error: any) {
       const systemError: Message = {
@@ -412,7 +427,8 @@ export default function App() {
             }
             return m;
           });
-          return { ...s, messages: [...updatedMessages, systemError] };
+          const cleanMsgs = updatedMessages.filter(m => m.id !== streamAiMessageId);
+          return { ...s, messages: [...cleanMsgs, systemError] };
         }
         return s;
       }));
@@ -456,7 +472,6 @@ export default function App() {
   const handleSendMessage = async (customText?: any, filePathsOverride?: string[]) => {
     if (isLoading) return;
 
-    // 👇 拦截 React 点击事件传递的 Event 对象。
     let userText = "";
     if (customText && typeof customText === "string") {
       userText = customText;
@@ -500,6 +515,26 @@ export default function App() {
     setAttachments([]);
     setIsLoading(true);
 
+    const streamAiMessageId = (Date.now() + 1).toString();
+    const currentProvider = getProviderByModel(selectedModel);
+
+    const initialAiResponse: Message = { 
+      id: streamAiMessageId, 
+      sender: "ai", 
+      text: "",
+      provider: currentProvider,
+      model: selectedModel,
+      timestamp: Date.now(),
+      sources: []
+    };
+
+    setSessions(prev => prev.map(session => {
+      if (session.id === activeSessionId) {
+        return { ...session, messages: [...session.messages, initialAiResponse] };
+      }
+      return session;
+    }));
+
     try {
       const apiMessages = currentMessages
         .filter(m => m.sender !== "system_err")
@@ -507,9 +542,6 @@ export default function App() {
           role: m.sender === "user" ? "user" : "assistant",
           content: m.text
         }));
-
-      // 👇 强力防御：如果是 Gemini 关键字，强制 Provider 为 gemini！
-      const currentProvider = getProviderByModel(selectedModel);
 
       const response = await fetch("http://127.0.0.1:5678/chat", {
         method: "POST",
@@ -519,7 +551,7 @@ export default function App() {
           provider: currentProvider,
           messages: [{ role: "system", content: "You are a helpful assistant" }, ...apiMessages],
           file_paths: filePathsToSend,
-          web_search: webSearchMode // 传递三态值：'off' | 'direct' | 'agent'
+          web_search: webSearchMode
         })
       });
 
@@ -528,34 +560,66 @@ export default function App() {
         throw new Error(errData.detail || "请求失败");
       }
 
-      const data = await response.json();
-      
-      const tokensUsed = 
-        data.usage?.total_tokens ?? 
-        data.usage?.total_token ?? 
-        data.usage_metadata?.total_tokens ?? 
-        data.total_tokens ?? 
-        data.tokens_used ?? 
-        data.response?.usage?.total_tokens ??
-        undefined;
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
 
-      const aiResponse: Message = { 
-        id: (Date.now() + 1).toString(), 
-        sender: "ai", 
-        text: data.content,
-        provider: currentProvider,
-        model: selectedModel,
-        tokensUsed: tokensUsed,
-        timestamp: Date.now(),
-        sources: data.sources || [] // 存储联网引用源
-      };
+      if (!reader) {
+        throw new Error("流式数据读取器初始化失败！");
+      }
 
-      setSessions(prev => prev.map(session => {
-        if (session.id === activeSessionId) {
-          return { ...session, messages: [...session.messages, aiResponse] };
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith("data: ")) continue;
+
+          const rawData = trimmed.slice(6).trim();
+          if (rawData === "[DONE]") {
+            break;
+          }
+
+          try {
+            const parsedData = JSON.parse(rawData);
+            if (parsedData.error) {
+              throw new Error(parsedData.error);
+            }
+
+            const textDelta = parsedData.choices?.[0]?.delta?.content || "";
+            const sources = parsedData.sources || [];
+            const tokensUsed = 
+              parsedData.usage?.total_tokens ?? 
+              parsedData.usage?.total_token ?? 
+              undefined;
+
+            setSessions(prev => prev.map(session => {
+              if (session.id === activeSessionId) {
+                const updatedMessages = session.messages.map(m => {
+                  if (m.id === streamAiMessageId) {
+                    return {
+                      ...m,
+                      text: m.text + textDelta,
+                      sources: sources.length > 0 ? sources : m.sources,
+                      tokensUsed: tokensUsed !== undefined ? tokensUsed : m.tokensUsed
+                    };
+                  }
+                  return m;
+                });
+                return { ...session, messages: updatedMessages };
+              }
+              return session;
+            }));
+          } catch (e: any) {
+            console.error("解析流式行失败:", e);
+          }
         }
-        return session;
-      }));
+      }
 
     } catch (error: any) {
       const systemError: Message = {
@@ -566,7 +630,8 @@ export default function App() {
       };
       setSessions(prev => prev.map(session => {
         if (session.id === activeSessionId) {
-          return { ...session, messages: [...session.messages, systemError] };
+          const cleanMsgs = session.messages.filter(m => m.id !== streamAiMessageId);
+          return { ...session, messages: [...cleanMsgs, systemError] };
         }
         return session;
       }));
@@ -575,10 +640,13 @@ export default function App() {
     }
   };
 
+  // 💡 交互优化：判定模型是否已经吐出字符或完成联网检索轨迹
+  const lastMsg = activeSession.messages[activeSession.messages.length - 1];
+  const isAiOutputStarted = lastMsg && lastMsg.sender === "ai" && (lastMsg.text.trim() !== "" || (lastMsg.sources && lastMsg.sources.length > 0));
+
   return (
     <div className="flex h-screen w-screen bg-[#202020] text-[#e3e3e3] overflow-hidden select-none font-sans">
       
-      {/* 1. 左侧侧边栏 */}
       <Sidebar 
         sessions={sessions}
         activeSessionId={activeSessionId}
@@ -588,10 +656,8 @@ export default function App() {
         onOpenSettings={() => setShowSettings(true)}
       />
 
-      {/* 2. 右侧主聊天区域 */}
       <div className="flex-1 flex flex-col bg-[#202020] h-full overflow-hidden relative">
         
-        {/* 👇 3秒遮罩警示弹窗 (Fluent微光质感) */}
         {warningMessage && (
           <div className="absolute inset-x-0 top-6 z-[9999] flex justify-center animate-in slide-in-from-top-4 fade-in duration-150">
             <div className="flex items-center gap-2.5 px-4 py-2.5 bg-[#4c1d1d]/95 text-red-200 border border-red-500/30 rounded-lg shadow-xl backdrop-blur-md text-xs font-semibold tracking-wide">
@@ -601,7 +667,6 @@ export default function App() {
           </div>
         )}
 
-        {/* 消息展示区 */}
         <div className="flex-1 overflow-y-auto px-12 py-6">
           {activeSession.messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center opacity-85">
@@ -621,10 +686,12 @@ export default function App() {
                   onSaveEdit={handleSaveEdit}
                   onCancelEdit={handleCancelEdit}
                   onSwitchBranch={handleSwitchBranch}
+                  isParentLoading={isLoading}
                 />
               ))}
-              {isLoading && (
-                <div className="flex gap-4 justify-start">
+              {/* 💡 只有处于 isLoading 且模型还没出字(isAiOutputStarted为false)时，才显示思考气泡 */}
+              {isLoading && !isAiOutputStarted && (
+                <div className="flex gap-4 justify-start animate-in fade-in duration-200">
                   <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-amber-600 to-orange-400 flex items-center justify-center text-xs shrink-0 select-none">🤖</div>
                   <div 
                     style={{ fontSize: chatFontSize }}
@@ -638,10 +705,7 @@ export default function App() {
                         ? "Tavily 正在直接抓取一轮中..." 
                         : selectedModel.toLowerCase().includes("deepseek") 
                         ? "DeepSeek 正在思考中..." 
-                        : selectedModel.toLowerCase().includes("gemini") 
-                        ? "Gemini 正在思考中..." 
-                        : "本地模型正在推理中..."
-                      }
+                        : "模型正在思考中..."}
                     </span>
                   </div>
                 </div>
@@ -651,81 +715,120 @@ export default function App() {
           )}
         </div>
 
-        {/* 底部输入框区 */}
         <ChatInput
           inputText={inputText}
           setInputText={setInputText}
           isLoading={isLoading}
           attachments={attachments}
+          onSelectFiles={handleSelectFiles}
+          onRemoveAttachment={handleRemoveAttachment}
           selectedModel={selectedModel}
+          setSelectedModel={setSelectedModel}
           availableModels={availableModels}
           showModelDropdown={showModelDropdown}
           setShowModelDropdown={setShowModelDropdown}
-          setSelectedModel={setSelectedModel}
-          onSelectFiles={handleSelectFiles}
-          onRemoveAttachment={handleRemoveAttachment}
-          onSendMessage={handleSendMessage}
           webSearchMode={webSearchMode}
           setWebSearchMode={setWebSearchMode}
+          onSendMessage={handleSendMessage}
         />
-
+        
       </div>
 
-      {/* 3. 侧边栏对话删除菜单 */}
+      {showSettings && (
+        <SettingsModal 
+          isOpen={showSettings}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
+
       {contextMenu.visible && (
         <div 
+          className="fixed bg-[#2b2b2b]/95 border border-[#444444]/60 text-xs text-red-300 rounded-lg shadow-2xl z-[9999] p-1.5 backdrop-blur-md min-w-[130px] transition-all animate-in fade-in zoom-in-95 duration-100"
           style={{ top: contextMenu.y, left: contextMenu.x }}
-          className="fixed bg-[#232324] border border-[#38383a] rounded-lg shadow-2xl py-1 w-32 z-[9999] animate-in fade-in duration-100"
+          onClick={() => {
+            const tid = contextMenu.targetSessionId;
+            if (tid) {
+              setSessions(prev => {
+                const rest = prev.filter(s => s.id !== tid);
+                if (rest.length === 0) {
+                  return [{ id: Date.now().toString(), title: "新对话", messages: [] }];
+                }
+                return rest;
+              });
+              if (activeSessionId === tid) {
+                setActiveSessionId(sessions.find(s => s.id !== tid)?.id || "1");
+              }
+            }
+            setContextMenu(prev => ({ ...prev, visible: false }));
+          }}
+          onMouseLeave={() => setContextMenu(prev => ({ ...prev, visible: false }))}
         >
-          <button 
-            onClick={() => handleDeleteSession(contextMenu.targetSessionId || "")}
-            className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-[#2d2d2e] flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <Trash2 size={12} />
-            <span>删除会话</span>
+          <button className="flex items-center gap-2.5 w-full text-left px-2.5 py-1.5 hover:bg-[#ff4d4d]/15 hover:text-red-200 rounded transition-colors font-medium">
+            <Trash2 size={13} className="text-red-400" />
+            <span>彻底删除此对话</span>
           </button>
         </div>
       )}
 
-      {/* 4. 对话右键多功能菜单 */}
       {msgContextMenu.visible && (
-        <div 
+        <div
+          className="fixed bg-[#2b2b2b]/95 border border-[#444444]/60 text-xs text-[#e3e3e3] rounded-lg shadow-2xl z-[9999] p-1.5 backdrop-blur-md min-w-[150px] transition-all animate-in fade-in zoom-in-95 duration-100"
           style={{ top: msgContextMenu.y, left: msgContextMenu.x }}
-          className="fixed bg-[#232324] border border-[#38383a] rounded-lg shadow-2xl py-1 w-32 z-[9999] animate-in fade-in duration-100"
+          onMouseLeave={() => setMsgContextMenu(prev => ({ ...prev, visible: false }))}
         >
           {msgContextMenu.targetMessageSender === "user" && (
-            <button 
-              onClick={() => handleStartEdit(msgContextMenu.targetMessageId || "")}
-              className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-[#2d2d2e] flex items-center gap-1.5 transition-colors cursor-pointer"
+            <button
+              className="flex items-center gap-2.5 w-full text-left px-2.5 py-1.5 hover:bg-[#ffffff]/10 rounded transition-colors font-medium mb-1"
+              onClick={() => {
+                const mid = msgContextMenu.targetMessageId;
+                setSessions(prev => prev.map(s => {
+                  if (s.id === activeSessionId) {
+                    return {
+                      ...s,
+                      messages: s.messages.map(m => m.id === mid ? { ...m, isEditing: true } : m)
+                    };
+                  }
+                  return s;
+                }));
+                setMsgContextMenu(prev => ({ ...prev, visible: false }));
+              }}
             >
-              <Edit3 size={12} />
-              <span>编辑消息</span>
+              <Edit3 size={13} className="text-[#a1a1a1]" />
+              <span>编辑此条消息</span>
             </button>
           )}
+
           {msgContextMenu.targetMessageSender === "user" && (
-            <button 
-              onClick={() => handleResendMessage(msgContextMenu.targetMessageId || "")}
-              className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-[#2d2d2e] flex items-center gap-1.5 transition-colors cursor-pointer"
+            <button
+              className="flex items-center gap-2.5 w-full text-left px-2.5 py-1.5 hover:bg-[#ffffff]/10 rounded transition-colors font-medium mb-1"
+              onClick={() => {
+                handleResendMessage(msgContextMenu.targetMessageId || "");
+                setMsgContextMenu(prev => ({ ...prev, visible: false }));
+              }}
             >
-              <RefreshCw size={12} />
-              <span>多分支重发</span>
+              <RefreshCw size={13} className="text-orange-400" />
+              <span>重新生成回答</span>
             </button>
           )}
-          <button 
-            onClick={() => handleDeleteMessage(msgContextMenu.targetMessageId || "")}
-            className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-[#2d2d2e] flex items-center gap-1.5 transition-colors cursor-pointer"
+
+          <button
+            className="flex items-center gap-2.5 w-full text-left px-2.5 py-1.5 hover:bg-[#ff4d4d]/15 hover:text-red-200 rounded transition-colors font-medium text-red-300"
+            onClick={() => {
+              const mid = msgContextMenu.targetMessageId;
+              setSessions(prev => prev.map(s => {
+                if (s.id === activeSessionId) {
+                  return { ...s, messages: s.messages.filter(m => m.id !== mid) };
+                }
+                return s;
+              }));
+              setMsgContextMenu(prev => ({ ...prev, visible: false }));
+            }}
           >
-            <Trash2 size={12} />
-            <span>删除消息</span>
+            <Trash2 size={13} className="text-red-400" />
+            <span>删除此消息气泡</span>
           </button>
         </div>
       )}
-
-      {/* 5. 设置弹窗 */}
-      <SettingsModal 
-        isOpen={showSettings}
-        onClose={() => setShowSettings(false)} 
-      />
 
     </div>
   );

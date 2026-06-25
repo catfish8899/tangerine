@@ -1,3 +1,4 @@
+// src/components/MessageItem.tsx 的完整修改流式优化版
 import React, { useState } from "react";
 import { 
   ChevronLeft, 
@@ -26,6 +27,7 @@ interface MessageItemProps {
   onSaveEdit: (messageId: string, newText: string) => void;
   onCancelEdit: (messageId: string) => void;
   onSwitchBranch: (messageId: string, direction: "prev" | "next") => void;
+  isParentLoading?: boolean; // 新增：父组件是否正处于 loading 状态，用于控制流式展示的合理时序
 }
 
 export default function MessageItem({
@@ -34,7 +36,8 @@ export default function MessageItem({
   onMsgContextMenu,
   onSaveEdit,
   onCancelEdit,
-  onSwitchBranch
+  onSwitchBranch,
+  isParentLoading = false
 }: MessageItemProps) {
   const isUser = msg.sender === 'user';
   const hasBranches = msg.branches && msg.branches.length > 1;
@@ -63,10 +66,22 @@ export default function MessageItem({
     }
   };
 
+  // 💡 现代化交互语言判定：
+  // 如果是 AI 助手消息，且当前文字内容为空、且没有检索引用源、且非错误消息时，
+  // 我们在回答出第一个字之前，完全不贴出这个空框，防止页面过于突兀。
+  const isAiThinkingAndEmpty = msg.sender === 'ai' && !msg.text && (!msg.sources || msg.sources.length === 0);
+  if (isAiThinkingAndEmpty) {
+    return null; // 优雅地保持隐形，只展示下方的“正在思考...”状态
+  }
+
+  // 💡 现代化时序判定：
+  // 底部大模型参数信息（提供商、模型、Token消耗、时间）只有在加载状态结束（或者已经非 Loading 状态）时才显示
+  const shouldShowMetadata = msg.sender === 'ai' && !msg.isEditing && !isParentLoading;
+
   return (
-    <div className={`flex gap-4 ${isUser ? 'justify-end' : 'justify-start'}`}>
+    <div className={`flex gap-4 ${isUser ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-200`}>
       {!isUser && msg.sender !== 'system_err' && (
-        <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-amber-600 to-orange-400 flex items-center justify-center text-xs shrink-0 select-none">🤖</div>
+        <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-amber-600 to-orange-400 flex items-center justify-center text-xs shrink-0 select-none shadow-md">🤖</div>
       )}
       
       <div 
@@ -132,7 +147,7 @@ export default function MessageItem({
                         </div>
                       </button>
 
-                      {/* 展开的动作轨迹轨迹和源链接 */}
+                      {/* 展开的动作轨迹和源链接 */}
                       {isSourcesOpen && (
                         <div className="mt-2 pt-2 border-t border-[#344035] space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-150">
                           <div className="flex flex-col gap-1 text-[10px] text-[#8cb096]">
@@ -207,14 +222,15 @@ export default function MessageItem({
           </div>
         )}
 
-        {msg.sender === 'ai' && !msg.isEditing && (
-          <div className="mt-1 pt-1.5 border-t border-white/5 flex items-center gap-2 text-[10px] text-gray-500 font-mono select-none">
+        {/* 💡 现代化时序：生成完毕（不再 Loading）才显示底部的各种系统参数 */}
+        {shouldShowMetadata && (
+          <div className="mt-1 pt-1.5 border-t border-white/5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-gray-500 font-mono select-none animate-in fade-in duration-300">
             <span>提供商: <strong className="text-gray-400 font-medium">{msg.provider || "未知"}</strong></span>
-            <span className="opacity-30">•</span>
+            <span className="opacity-30 text-[8px]">•</span>
             <span>模型: <strong className="text-gray-400 font-medium">{msg.model || "未知"}</strong></span>
-            <span className="opacity-30">•</span>
+            <span className="opacity-30 text-[8px]">•</span>
             <span>Token消耗: <strong className="text-gray-400 font-medium">{msg.tokensUsed !== undefined ? msg.tokensUsed : "未知"}</strong></span>
-            <span className="opacity-30">•</span>
+            <span className="opacity-30 text-[8px]">•</span>
             <span>时间: <strong className="text-gray-400 font-medium">{format12HourTime(msg.timestamp)}</strong></span>
           </div>
         )}

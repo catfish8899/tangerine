@@ -1,11 +1,11 @@
-tangerine 桌面 AI 助手 - 阶段性开发说明书
+tangerine 桌面 AI 助手 - 阶段性开发说明书 (流式流转解耦版)
 本项目是一款基于 Windows 11 Fluent Design（暗黑微光风格）的 AI 智能聊天客户端。应用后端使用 Rust (Tauri 2.0) 管理窗口及生命周期，并通过本地 Python Sidecar 服务桥接调用云端 DeepSeek/Gemini API 及本地 Ollama 服务，确保 API 密钥的安全性和本地扩展能力。
 
 一、 技术栈组成 & 新增前端依赖
 宿主与壳层 (Desktop Shell)
 
 Tauri 2.0：轻量级桌面开发框架。使用 Rust 构建，负责管理应用窗口、文件系统访问，以及在后台自动拉起和管理 Python Sidecar 子进程。
-@tauri-apps/plugin-shell（新增）：用于在桌面壳中跨进程、安全地调用 Windows 操作系统的默认浏览器（Chrome / Edge）打开网页引用源。
+@tauri-apps/plugin-shell：用于在桌面壳中跨进程、安全地调用 Windows 操作系统的默认浏览器（Chrome / Edge）打开网页引用源。
 安装命令： pnpm tauri add shell
 前端界面 (Frontend UI)
 
@@ -21,7 +21,24 @@ remark-gfm: 插件，支持 GitHub 风格的 Markdown（表格、任务列表等
 rehype-highlight & highlight.js: 插件及主题包，用于解析代码块并提供 Atom One Dark 彩色高亮样式。
 安装命令：
 pnpm add react-markdown remark-gfm rehype-highlight highlight.js
-二、 项目文件夹结构
+
+二、 核心功能与架构升级说明
+1. SSE (Server-Sent Events) 流式传输架构：
+   后端 FastAPI 路由 `/chat` 统一改造为返回 `StreamingResponse` (基于 `text/event-stream` 协议)。
+   前端摒弃了原有的阻塞式 `axios`/`fetch` 响应，改用原生的 `fetch` 获取 `response.body.getReader()`。通过自定义 decoder 逐包解析以 `data: ` 开头的流式数据并向 React 状态机进行高频追加更新，实现丝滑、低延迟的流式打字机效果。
+
+2. 本地 Ollama 通道高抗错改造：
+   为彻底解决本地模型偶尔不吐字及多电脑环境下连接不稳定的问题，后端 Ollama 流式链路升级为直接使用标准的 `OpenAI` SDK 直连本地 `11434` 端口的 `/v1` 兼容网关，抹平了底层 SSE 字符缓冲差异，实现了 100% 稳定的流式输出。
+
+3. 熔断防御机制（消灭幽灵消息）：
+   前端专门建立了流式熔断控制（Try-Catch Stream Breaker）。当云端接口、网络环境或本地 Ollama 服务在流式建立及握手阶段抛出异常时，前端立即熔断并在内存及 LocalStorage 中彻底“抹杀”刚才为了等待流式而创建的空临时 AI 占位消息，并在下方追加带有清晰提示的 `system_err` 系统报错气泡。这完美保护了 `[User-AI]` 的严格交替对话逻辑。
+
+4. 现代化微光交互语言：
+   - 思考状态自动渐隐：点击发送后仅显示“模型正在思考中...”提示；一旦模型吐出第一个字符或展现联网检索轨迹（出字瞬间），提示气泡立即消失，避免空间重叠与无谓抖动。
+   - 气泡隐入：在回答出第一个字符之前，AI 空文本框完全隐形。
+   - 属性淡入：大模型底部的提供商、模型名称、Token 消耗、响应时间等系统专业 Metadata 只有在整个流式加载完成（isLoading 结束）后，才会整齐、优雅地淡入显示。
+
+三、 项目文件夹结构
 以下是本项目目前已构建的核心文件夹结构，重点标注了我们修改/新建以及解耦重构的关键文件：
 
 tangerine/
@@ -32,21 +49,21 @@ tangerine/
 │   ├── components/                # [组件目录]
 │   │   ├── CodeBlock.tsx          # 可复制代码块：支持传入 fontSize 参数，微调代码文字大小以自适应全局对话字号设置
 │   │   ├── MarkdownMessage.tsx    # Markdown 解析器：接收外部 fontSize，动态自适应行内代码、表格及多级标题比例，进行 Fluent 风格渲染
-│   │   ├── MessageItem.tsx        # 消息渲染组件：专门管理单条消息的气泡呈现、编辑模式、分支切换、文件附件显示。新增对 Tavily 联网引用源（sources）的流畅解析，通过 Fluent 微光抽屉折叠展现“多轮检索轨迹”，利用 @tauri-apps/plugin-shell 安全调用默认浏览器进行一键跳转
-│   │   ├── ChatInput.tsx          # [已修改] 底部输入组件：包含附件预览栏、输入框、添加附件按钮、混合模型下拉选择器。修复了模型分类提示逻辑，将 Gemini、DeepSeek 优雅区分并显示为其对应的“云端模型”标签，防止其错误退化标记为本地 Ollama，配合不同微光圆点指示其状态
+│   │   ├── MessageItem.tsx        # [已修改] 消息渲染组件：配合全新流式，未出字时空框隐形，加载时处于骨架动画。支持 Tavily 联网引用源（sources）的流畅解析与微光折叠抽屉展现实时轨迹。仅在加载完全结束后才淡入呈现底部元数据参数，避免视觉冗余。
+│   │   ├── ChatInput.tsx          # 底部输入组件：包含附件预览栏、输入框、添加附件按钮、混合模型下拉选择器。优雅区分云端/本地模型分类并配备状态指示圆点。
 │   │   ├── Sidebar.tsx            # 侧边栏：管理聊天历史切换、右键菜单、新建会话以及跳转“设置”
-│   │   └── SettingsModal.tsx      # [已修改] 设置面板：重构为多 Tab 导航（“云端模型设置”、“本地模型设置”和“对话格式设置”）。默认云端配置预设模块升级为：DeepSeek 与 Gemini 双通道。支持本地 Ollama 状态一键检测、本地模型一键同步检索，并在本地模型设置底部支持专属 Ollama 管理，完全避免与云端 API 产生配置挤占与物理顶替。
+│   │   └── SettingsModal.tsx      # 设置面板：重构为多 Tab 导航（“云端模型设置”、“本地模型设置”和“对话格式设置”）。支持本地 Ollama 状态检测与模型一键同步，避免云/本配置 physical 挤占。
 │   ├── types/                     # [类型目录]
-│   │   └── chat.ts                # 类型声明文件：承载 Session、Message、Attachment 类型定义与文件类型/时间处理辅助函数。在 Message 类型中新增 sources 属性声明，用于存放采信的互联网网页标题与超链接
-│   ├── App.tsx                    # [已修改] 主界面组件：作为核心控制器，新增全局字号监听与分发、双系统右键删除菜单、API Token 多路径捕获。支持动态拉取加载本地与云端的混合模型列表。在发送和重发消息时，提取 webSearchMode 状态实时透传发送给本地 FastAPI 接口。修复了点击发送按钮在传入 Event 对象时的参数混淆静默拦截 Bug。新增对选中模型的 Provider（deepseek / gemini / ollama）的强制防御判定，并安全广播路由
+│   │   └── chat.ts                # 类型声明文件：承载 Session、Message、Attachment 类型定义与文件类型/时间处理辅助函数。
+│   ├── App.tsx                    # [已修改] 主界面组件：核心控制台。已重构为全 SSE 读取。加入了流式死锁阻断器、熔断保护擦除。修复了 SettingsModal 传参缺失及 React 状态更新方法错误，确保 TypeScript 强类型无缝构建通过。
 │   ├── index.css                  # Tailwind v4 规范升级：引入 @import "tailwindcss" 并声明 @source 自定义扫描源
 │   ├── main.tsx                   # 前端入口文件：引入 React、App 组件并加载 index.css、highlight.js/styles/atom-one-dark.css
 │   └── vite-env.d.ts              # Vite 环境变量类型定义
 ├── src-tauri/                     # Rust 宿主后端源代码
 │   ├── py_sidecar/                # [Python Sidecar 服务目录]
-│   │   ├── main.py                # [已修改] 本地 FastAPI 服务：解耦原本硬编码单一支持云端 DeepSeek 的弊端，彻底打通 Gemini 官方 SDK 接口，支持对 `google-genai` 中 `generate_content` 高抗错多轮对话架构的调度。内置非阻塞式调试器广播管道。
-│   │   ├── debugger.py            # [新增] 开发者实时调试监控面板：完全独立的控制台热插拔调试脚本。开启后本地启动 9999 端口，以终端彩色标记（Hardcore Debugger）高亮展示每一次大模型推理前灌入的【完整上下文数据（包含合并System、多轮 Observation）】与【模型生鲜 Output】
-│   │   └── requirements.txt       # [已修改] Python 依赖声明：彻底合并 LlamaCloud 解析依赖与 tavily-python 依赖，并加入 Google Gemini 官方全新 `google-genai` SDK 依赖
+│   │   ├── main.py                # [已修改] 本地 FastAPI 服务：彻底支持 SSE (Server-Sent Events) 协议。将 Ollama 底层重构为标准 OpenAI 直连。完美合并了 Gemini/DeepSeek API 的流式双通路，支持非阻塞式开发者广播管道。
+│   │   ├── debugger.py            # 开发者实时调试监控面板：彩色高亮时序展示推理上下文注入、大模型 Output 及 Tavily 自主检索。
+│   │   └── requirements.txt       # Python 依赖声明：彻底合并 LlamaCloud 解析依赖、tavily-python 及 google-genai 官方 SDK。
 │   ├── src/
 │   │   ├── lib.rs                 # Tauri 启动入口：包含智能路径识别，在后台伴随 Tauri 自动拉起/管理 Python 子进程
 │   │   └── main.rs                # Rust 程序编译入口
@@ -56,12 +73,10 @@ tangerine/
 ├── package.json                   # 前端 Node.js 项目配置文件
 ├── pnpm-lock.yaml                 # pnpm 锁定依赖版本文件
 ├── postcss.config.js              # PostCSS 配置文件，激活 @tailwindcss/postcss
-├── tailwind.config.js             # Tailwind CSS 模版路径扫描配置（作为 v3 兼容层备用，主要以 index.css 的 @source 为编译基准）
+├── tailwind.config.js             # Tailwind CSS 模版路径扫描配置
 └── README.md                      # 项目说明文档
 
---------------------------------------------------------------------------------------------------------------------------------
-
-#### 三、 项目环境依赖与多电脑协同开发
+四、 项目环境依赖与多电脑协同开发
 为了能在不同的电脑上通过 GitHub 克隆代码后快速恢复开发，请确保目标电脑满足以下环境：
 
 1. 全局系统环境要求
@@ -95,3 +110,4 @@ PowerShell: Remove-Item -Recurse -Force .vite
 在另一个终端下进入 `src-tauri/py_sidecar/`，运行：
 python debugger.py
 即可开启硬件级时序上下文监控面板。
+
