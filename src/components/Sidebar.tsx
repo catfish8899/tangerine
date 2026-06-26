@@ -18,6 +18,7 @@ interface ChatSession {
   id: string;
   title: string;
   messages: Message[];
+  type?: "chat" | "automation"; // 👈 同步引入对应状态支持
 }
 
 interface SidebarProps {
@@ -26,8 +27,9 @@ interface SidebarProps {
   setActiveSessionId: (id: string) => void;
   onContextMenu: (e: React.MouseEvent, sessionId: string) => void;
   onCreateSession: () => void;
-  onOpenSettings: () => void; // 开启设置按钮回调
-  onOpenRoles: () => void;     // 👈 新增：开启角色设置菜单的回调
+  onCreateAutomationSession: () => void; // 👈 新增：创建自动化流程页面的回调
+  onOpenSettings: () => void; 
+  onOpenRoles: () => void;     
 }
 
 export default function Sidebar({
@@ -36,8 +38,9 @@ export default function Sidebar({
   setActiveSessionId,
   onContextMenu,
   onCreateSession,
+  onCreateAutomationSession, // 👈 接收回调
   onOpenSettings,
-  onOpenRoles // 👈 接收角色回调
+  onOpenRoles 
 }: SidebarProps) {
   return (
     <div className="w-[260px] bg-[#181818] flex flex-col border-r border-[#2d2d2d] shrink-0 justify-between select-none">
@@ -60,9 +63,16 @@ export default function Sidebar({
                   : 'hover:bg-[#202020] text-gray-400'
               }`}
             >
-              <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-amber-600 to-orange-400 flex items-center justify-center text-[10px] text-white font-bold shrink-0">
-                🤖
-              </div>
+              {/* 👇 根据类型分别渲染图标 */}
+              {session.type === 'automation' ? (
+                <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-cyan-600 to-blue-400 flex items-center justify-center text-[10px] text-white font-bold shrink-0 shadow-sm shadow-cyan-900/50">
+                  ⚡
+                </div>
+              ) : (
+                <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-amber-600 to-orange-400 flex items-center justify-center text-[10px] text-white font-bold shrink-0">
+                  🤖
+                </div>
+              )}
               <span className="text-xs truncate font-medium">{session.title}</span>
             </div>
           ))}
@@ -79,14 +89,17 @@ export default function Sidebar({
             <Plus size={14} />
             新对话
           </button>
-          <button className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-md bg-[#1e272e] hover:bg-[#253039] text-[#4ea1db]/80 border border-[#232f3a] transition-colors text-xs font-semibold">
+          {/* 👇 绑定创建自动化工作流的方法 */}
+          <button 
+            onClick={onCreateAutomationSession}
+            className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-md bg-[#1e272e] hover:bg-[#253039] text-[#4ea1db]/80 border border-[#232f3a] transition-colors text-xs font-semibold"
+          >
             <ImageIcon size={14} />
             新自动化流程
           </button>
         </div>
 
         <div className="space-y-1 text-xs text-gray-400 pt-2 border-t border-[#252525]">
-          {/* 👇 我的角色 绑定点击事件 */}
           <div 
             onClick={onOpenRoles}
             className="flex items-center gap-2.5 px-3 py-2 rounded hover:bg-[#252525] hover:text-white cursor-pointer transition-colors"
@@ -99,7 +112,6 @@ export default function Sidebar({
             <HelpCircle size={15} />
             <span>我的文件</span>
           </div>
-          {/* 设置按钮 */}
           <div 
             onClick={onOpenSettings} 
             className="flex items-center gap-2.5 px-3 py-2 rounded hover:bg-[#252525] hover:text-white cursor-pointer transition-colors"

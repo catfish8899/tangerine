@@ -14,19 +14,18 @@ export interface Message {
   activeBranchIndex?: number;
   branches?: Message[][]; // 存储该用户消息发起的分支（每个分支包含该节点之后的所有后续消息数组）
 
-  // 👇 新增：保存 Tavily 联网检索的来源网页列表（每个来源包括标题和跳转链接）
+  // 👇 保存 Tavily 联网检索的来源网页列表
   sources?: Array<{ title: string; url: string }>;
 }
 
-// 👇 修改：增加角色 ID 绑定支持
 export interface ChatSession {
   id: string;
   title: string;
   messages: Message[];
-  roleId?: string; // 👈 绑定到当前会话的角色 ID
+  roleId?: string; // 绑定到当前会话的角色 ID
+  type?: "chat" | "automation"; // 👈 新增：标记该会话是普通对话还是自动化流程页面
 }
 
-// 👇 新增：角色系统提示词接口定义
 export interface Role {
   id: string;
   name: string;
