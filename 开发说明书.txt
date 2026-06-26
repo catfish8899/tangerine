@@ -1,4 +1,5 @@
-tangerine 桌面 AI 助手 - 阶段性开发说明书 (流式流转解耦 & 角色系统 & 自动化工作流画布初版)
+### tangerine 桌面 AI 助手 - 阶段性开发说明书 (流式流转解耦 & 角色系统 & 自动化工作流画布初版)
+
 本项目是一款基于 Windows 11 Fluent Design（暗黑微光风格）的 AI 智能聊天客户端。应用后端使用 Rust (Tauri 2.0) 管理窗口及生命周期，并通过本地 Python Sidecar 服务桥接调用云端 DeepSeek/Gemini API 及本地 Ollama 服务，确保 API 密钥的安全性和本地扩展能力。
 
 一、 技术栈组成 & 新增前端依赖
@@ -48,26 +49,24 @@ pnpm add @xyflow/react
    - 气泡隐入：在回答出第一个字符之前，AI 空文本框完全隐形。
    - 属性淡入：大模型底部的提供商、模型名称、Token 消耗、响应时间等系统专业 Metadata 只有在整个流式加载完成（isLoading 结束）后，才会整齐、优雅地淡入显示。
 
-6. 自动化工作流画布初版（新增）：
+6. 自动化工作流画布（深度更新与增强）：
    - 独立会话类型：在 ChatSession 中新增 type 字段，用于区分普通聊天会话与自动化流程会话。普通聊天为 "chat"，自动化流程为 "automation"。
-   - 左侧统一会话列：点击“新自动化流程”后，会在左侧会话列表中创建一条新的自动化流程记录。它与“新对话”创建的普通聊天记录同处于左侧竖列，但右侧展开内容完全不同。
-   - 右侧独立画布：自动化流程会话右侧不再展示聊天输入框与消息流，而是展示基于 @xyflow/react 的深色点阵画布。
-   - 底部工作流菜单栏：画布底部提供悬浮磨砂菜单栏，包含“角色”、“工具”、“开关”、“集合”四类上拉菜单。
-     - “角色”菜单：从本地角色系统 localStorage 数据 tangerine_roles 中读取角色列表，可将具体角色拖入画布生成角色节点。
-     - “工具”菜单：当前内置“联网搜索”工具节点，后续可扩展更多工具节点。
-     - “开关”菜单：当前内置“开始对话”入口节点，后续用于触发自动化流程执行。
-     - “集合”菜单：当前内置“集合区域”节点，支持生成可调大小的画布范围框。
-   - 拖拽实现策略：由于 Tauri WebView + React Flow 场景下浏览器原生 HTML5 draggable / dataTransfer / drop 机制存在不稳定情况，曾出现拖拽到画布显示“禁止”图标的问题，因此当前工作流菜单采用 Pointer 事件模拟拖拽：
-     - pointerdown：从菜单项开始拖拽；
-     - pointermove：显示跟随鼠标的幽灵预览；
-     - pointerup：若鼠标释放位置位于画布区域内，则通过 screenToFlowPosition 转换坐标并创建 React Flow 节点。
-   - 自定义节点初版：
-     - automationRoleNode：角色节点，展示角色名称与系统提示词摘要。
-     - automationToolNode：工具节点，当前用于联网搜索工具。
-     - automationTriggerNode：开关/入口节点，当前用于“开始对话”。
-     - automationCollectionNode：集合区域节点，使用 NodeResizer 支持选中后调整区域大小。
-   - 暗黑视觉适配：隐藏 React Flow 右下角默认 attribution；对 Controls 控制栏进行暗黑主题样式覆盖；节点、连线、拖拽预览均采用 Windows 11 暗黑微光风格。
-   - 当前边界：本阶段只完成工作流画布的初版交互与节点生成。尚未实现工作流数据持久化、自动执行引擎、节点配置面板、集合区域父子归属检测、节点删除/复制粘贴快捷键、流程合法性校验等高级功能。
+   - 跨会话画布物理隔离：每个自动化流程会话拥有其专属的 `sessionId`。画布数据持久化文件统一命名为 `tangerine_automation_flow_{sessionId}` 并实时存储至 LocalStorage，彻底解决了不同自动化画布之间数据相互覆盖、交叉污染的痛点。
+   - 会话物理销毁联动：在左侧会话列表中右键彻底删除某个自动化流程会话时，系统将同步、彻底清除该会话专属的 LocalStorage 画布数据，确保无无效脏数据残留。
+   - 右上角系统时间组件：画布右上角常驻高雅、半透明磨砂的系统时间组件（SystemTimeBadge），实时同步显示高精度系统时间，格式包含：“年月日、12小时制（上午/下午 时:分:秒）”。
+   - 右下角暗黑主题小地图：画布右下角嵌入高度定制的 `MiniMap` 小地图组件，背景色为深黑（#181818），遮罩层呈半透明黑色。不同节点类型映射不同的小地图高亮微光颜色：集合节点高亮紫色，角色节点高亮金黄，工具节点高亮天蓝，对话节点高亮青色等，提升大型复杂工作流的全局检索操控体验。
+   - 底部悬浮磨砂菜单栏：提供“角色”、“工具”、“开关”、“集合”、“对话”、“硬件”、“定时”七大类上拉菜单，均采用 Pointer 事件模拟拖拽生成。
+     - “角色”菜单：读取本地 LocalStorage 数据中 `tangerine_roles` 列表，拖拽生成角色节点。
+     - “工具”菜单：提供精简版“联网搜索”工具。
+     - “开关”菜单：内置“开始对话”入口节点。
+     - “集合”菜单：内置“集合区域”节点，利用 NodeResizer 独立调整区域大小。
+     - “对话”菜单（新增）：内置“对话”节点，画布内节点带有一款高度抗冲突的输入框（`.nodrag` 区域），用户能直接在画布中双击、聚焦并录入多行文本对话。
+     - “硬件”菜单（新增）：内置“硬件”节点，节点渲染并常驻“连接硬件”文字说明，用于硬件控制。
+     - “定时”菜单（新增）：内置“定时”节点，带有专门的输入组件（`.nodrag` 区域），供用户快速手动录入如 “2026年01月01日 下午 3:30” 的年月日 + 12小时制时间数据。
+   - 键盘快捷键组合与撤销历史机制：
+     - **撤销重做 (Ctrl + Z)**：内置轻量级历史快照管理器，最大深度 80 步。支持节点拖拽、集合拉伸、节点新建、节点物理删除、连线生成以及粘贴等所有操作的一步撤销，保障画布编辑安全。
+     - **徹底删除 (Delete / Backspace)**：一键删除当前选中的节点、边连线。如果删除的是集合节点，其内部已被吸附归宿的子孙节点及相关连线将合并执行联动级联删除，拒绝孤立悬空节点。
+     - **深度复制与粘贴 (Ctrl + C & Ctrl + V)**：支持多选、跨画布复制粘贴。若选中的元素中包含“集合”节点，系统会自动捕获并复制该集合区域内吸附的**所有子节点以及它们之间的完整边连线**。粘贴时，以当前鼠标在画布内的世界坐标为锚点，内部子节点相对集合的物理相对坐标保持原样不变，且粘贴出的所有节点和边将自动被赋予全新、抗冲突的唯一 ID 标识，防止画布节点污染。
 
 三、 项目文件夹结构
 以下是本项目目前已构建的核心文件夹结构，重点标注了我们修改/新建以及解耦重构的关键文件：
@@ -85,10 +84,10 @@ tangerine/
 │   │   ├── Sidebar.tsx            # [已修改] 侧边栏：管理聊天历史切换、右键菜单、新建普通会话、新建自动化流程会话，以及跳转“设置”、点击“我的角色”一键调出设定菜单。会话列表支持区分普通聊天与自动化流程类型。
 │   │   ├── SettingsModal.tsx      # 设置面板：重构为多 Tab 导航（“云端模型设置”、“本地模型设置”和“对话格式设置”）。支持本地 Ollama 状态检测与模型一键同步，避免云/本配置 physical 挤占。
 │   │   ├── RolesModal.tsx         # 角色设置菜单：磨砂半透明背景全覆盖卡片系统，执行重复名称校验，实现本地 LocalStorage 状态自闭环持久化。
-│   │   └── AutomationWorkspace.tsx # [新增] 自动化工作流画布组件：基于 @xyflow/react 构建深色点阵画布，包含底部上拉菜单栏、Pointer 模拟拖拽、角色/工具/开关/集合节点生成、自定义节点渲染与集合节点 NodeResizer 尺寸调节。
+│   │   └── AutomationWorkspace.tsx # [已重构/深度更新] 自动化工作流画布组件：基于 @xyflow/react 构建深色点阵画布。全面实现了多会话隔离存储、右上角年月日+12小时制系统时钟、右下角高拟真暗黑 MiniMap、Ctrl+C/V 深度复制粘贴、Ctrl+Z 多级撤销操作历史、Delete 级联删除；精简了联网搜索节点布局；并新增了内含文本框输入的“对话”、“定时”节点与预留“硬件”节点。
 │   ├── types/                     # [类型目录]
 │   │   └── chat.ts                # [已修改] 类型声明文件：新增 Role 角色接口规范；在 ChatSession 中拓展 roleId 用于指针关联，并新增 type?: "chat" | "automation" 用于区分普通聊天会话与自动化流程会话。
-│   ├── App.tsx                    # [已修改] 主界面组件：核心控制台。已重构为高容错 SSE 解析器。内置不可变引用更新状态机防止 React 页面失弹，支持新对话快速角色选取与顶部常驻 System 指令设定气泡显示。新增自动化流程视图分流：当 activeSession.type 为 "automation" 时，右侧渲染 AutomationWorkspace；否则渲染原聊天工作区。
+│   ├── App.tsx                    # [已修改] 主界面组件：核心控制台。新增自动化流程视图分流。已支持侧边栏右键删除自动化会话时，主动同步销毁对应 LocalStorage 中的画布数据，保持系统整洁。
 │   ├── index.css                  # Tailwind v4 规范升级：引入 @import "tailwindcss" 并声明 @source 自定义扫描源
 │   ├── main.tsx                   # 前端入口文件：引入 React、App 组件并加载 index.css、highlight.js/styles/atom-one-dark.css
 │   └── vite-env.d.ts              # Vite 环境变量类型定义
@@ -164,24 +163,19 @@ python debugger.py
 2. React Flow 类型约束说明
 @xyflow/react 新版中 Node<TData> 的 TData 需要满足 Record<string, unknown>。因此自动化节点数据类型 AutomationNodeData 必须显式继承 Record<string, unknown>，否则 TypeScript 会报错。
 
-当前核心类型设计：
-- AutomationNodeKind = "role" | "tool" | "trigger" | "collection"
-- AutomationTemplate：底部菜单模板项
-- AutomationNodeData extends Record<string, unknown>：画布节点数据
-- AutomationFlowNode = Node<AutomationNodeData>
-- AutomationFlowEdge = Edge
+在进行数组连接或重构画布选中态重置逻辑时，TypeScript 容易将 `map` 后返回的局部对象窄化推断（例如将 `selected: false` 锁死为 `boolean` 非可选类型），从而与 React Flow 宽松的 `AutomationFlowNode[]` （其中 `selected?: boolean` 为可选）发生重载调用冲突。应当避免直接使用 Array 的原生 `.concat()`，改为在返回解构数组前显式声明函数的输出类型，例如：
+`setNodes((currentNodes): AutomationFlowNode[] => { ... })`
+通过对数组或 `map` 转换器施加精确断言，能够彻底规避编译期重载匹配失效。
 
-ReactFlow 组件也应同步声明泛型：
-ReactFlow<AutomationFlowNode, AutomationFlowEdge>
-
-3. 当前节点类型
+3. 节点定制类型
 当前注册的自动化节点类型：
-- automationRoleNode：角色节点
-- automationToolNode：工具节点
-- automationTriggerNode：开关/入口节点
-- automationCollectionNode：集合范围节点
-
-集合节点使用 NodeResizer，选中后可调整大小。
+- `automationRoleNode`：角色节点。
+- `automationToolNode`：工具节点（当前用于精简后的“联网搜索”，仅显示节点名称与工具名称）。
+- `automationTriggerNode`：开关/入口节点（“开始对话”）。
+- `automationCollectionNode`：集合范围节点（使用 NodeResizer 调整区域尺寸）。
+- `automationConversationNode`（新增）：对话节点，带双向同步 textarea 文本框。
+- `automationHardwareNode`（新增）：硬件节点，常驻“连接硬件”标题。
+- `automationTimerNode`（新增）：定时节点，带年月日+12小时制时间格式 input 输入框。
 
 4. 角色菜单数据来源
 自动化流程的“角色”菜单直接读取 localStorage 中的 tangerine_roles，与现有 RolesModal 角色系统共用数据源。
@@ -195,13 +189,15 @@ ReactFlow<AutomationFlowNode, AutomationFlowEdge>
 - 在底部按钮与上拉面板之间增加透明连接桥；
 - 保证用户可以从底部按钮自然移动到上方细分选项并开始拖拽。
 
-6. 当前未完成能力
-当前只是工作流画布和节点模板的初版，不包含完整自动化执行能力。后续建议按以下顺序继续开发：
-- 画布数据持久化：按 automation session id 保存 nodes / edges；
-- 节点右键菜单：删除、复制、查看配置；
-- 节点配置面板：角色节点可切换角色，工具节点可配置参数，开关节点可配置触发方式；
-- 集合区域父子归属：拖入集合框后自动设置 parentId，拖出后解除；
-- 工作流执行引擎：从“开始对话”节点出发，根据连线拓扑解析角色、工具、模型调用顺序；
-- 流程合法性校验：避免孤立入口、多入口冲突、环形依赖、缺少角色节点等；
-- 自动化流程与普通聊天的执行桥接：运行工作流后可将结果写入聊天消息流或创建独立执行日志。
+6. 键盘快捷键与撤销历史机制（新增说明）
+   - 画布内的快捷键监听需要特别注意**输入框焦点防御**。在事件回调头部，必须通过调用 `isEditableElement(event.target)` 来对正在进行文本编辑（如对话、定时节点中的 input, textarea 或是其他 contenteditable 区域）的用户输入行为进行豁免拦截，避免在输入字符时意外触发删除节点、复制、粘贴或撤销动作。
+   - `Ctrl+C` 深度复制集合时，算法会自动利用广度/深度优先逻辑（通过 `getDescendantNodeIds`）递归扫描集合节点内吸附的每一级子孙节点，合并收集处于两点之间的所有边缘连线（edges），并将它们的绝对世界坐标一并导出。
+   - `Ctrl+V` 深度粘贴时，系统以鼠标当前的流坐标（flow coordinates）为贴图中心点，把剪贴板内所有节点的旧绝对坐标对准新中心，重新计算出它们的位移差（delta offset），以此算出粘贴后的新绝对坐标，对于包含集合子级的节点，根据重新计算后的相对父节点坐标进行再转换，使其能够天衣无缝地维持在粘贴后的新集合区域内，不发生错位或散架。
+   - 撤销机制利用纯函数 `cloneFlowSnapshot` 对 `nodes` 和 `edges` 状态深度深拷贝。每次在节点改变大小（维度改变）或拖拽节点开始时抓取初始镜像，当有实质性操作发生时，向快照队列推进新记录。
+
+7. 当前未完成能力（已更新）
+   在完成了多会话隔离、撤销重做历史、快捷键、深度复制粘贴、高精度时钟、暗黑 MiniMap 以及输入型节点定制后，接下来的迭代开发建议按以下方向进行：
+   - **工作流执行引擎**：从“开始对话”等 trigger 节点出发，根据有向无环连线拓扑关系，在 Python Sidecar 侧建立运行管道，解析角色、工具和对话输入节点的调用顺序。
+   - **节点参数细化面板**：双击节点或右键菜单中加入“属性配置”抽屉，供用户为工具节点、对话节点微调更深层次的参数模型设定（如：更换大模型提供商、设置延时长度等）。
+   - **流程连线合法性校验**：自动侦测画布内的孤立节点、环形死循环连线、多触发器冲突等异常状态并进行红色高亮警告。
 

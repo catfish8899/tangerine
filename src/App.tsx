@@ -8,6 +8,8 @@ import ChatWorkspace from "./components/ChatWorkspace";
 import AutomationWorkspace from "./components/AutomationWorkspace";
 import { useChatManager } from "./hooks/useChatManager";
 
+const AUTOMATION_FLOW_STORAGE_PREFIX = "tangerine_automation_flow_";
+
 export default function App() {
   // 通过自定义 Hook 引入所有的视图状态和方法
   const { state, actions, refs } = useChatManager();
@@ -34,7 +36,7 @@ export default function App() {
       {/* --- 右侧主工作区 --- */}
       <div className="flex-1 flex flex-col bg-[#202020] h-full overflow-hidden relative">
         {activeSession?.type === "automation" ? (
-          <AutomationWorkspace />
+          <AutomationWorkspace sessionId={activeSession.id} />
         ) : (
           <ChatWorkspace state={state} actions={actions} refs={refs} />
         )}
@@ -55,6 +57,14 @@ export default function App() {
           onClick={() => {
             const tid = contextMenu.targetSessionId;
             if (tid) {
+              const targetSession = sessions.find((s: any) => s.id === tid);
+
+              // 自动化流程画布与普通对话是两套业务逻辑。
+              // 删除自动化会话时，同步清理该会话独立的画布持久化数据，避免遗留脏数据。
+              if (targetSession?.type === "automation") {
+                localStorage.removeItem(`${AUTOMATION_FLOW_STORAGE_PREFIX}${tid}`);
+              }
+
               actions.setSessions((prev: any) => {
                 const rest = prev.filter((s: any) => s.id !== tid);
                 if (rest.length === 0) return [{ id: Date.now().toString(), title: "新对话", messages: [], type: "chat" }];
