@@ -15,20 +15,84 @@
 
 ---
 
-## 3. 快速启动命令（新电脑一键复制执行）
+## 3. 当前项目关键依赖补充说明
+除基础环境外，当前项目已经实际用到以下桌面端相关能力与依赖：
 
-### 步骤 A：在根目录下执行，安装前端及画布依赖
+### 前端 / Node 侧
+- `@tauri-apps/plugin-shell`
+- `@tauri-apps/plugin-dialog`
+- `@tauri-apps/plugin-fs`
+- `@xyflow/react`
+- `react-markdown`
+- `remark-gfm`
+- `rehype-highlight`
+- `highlight.js`
+
+### Rust 侧
+- `tauri = "2"`
+- `tauri-plugin-opener = "2"`
+- `tauri-plugin-dialog = "2"`
+- `tauri-plugin-shell = "2"`
+- `tauri-plugin-fs = "2"`
+- `serde`
+- `serde_json`
+- `base64 = "0.22"`
+
+### Python Sidecar 侧
+- 依赖以 `src-tauri/py_sidecar/requirements.txt` 为准；
+- 需要保证 `python` 命令在 PowerShell / CMD 中可直接调用。
+
+---
+
+## 4. 快速启动命令（新电脑一键复制执行）
+
+### 步骤 A：在根目录下安装前端依赖
 ```bash
-pnpm install && pnpm tauri add shell && pnpm add @xyflow/react react-markdown remark-gfm rehype-highlight highlight.js
-步骤 B：安装 Python Sidecar 依赖
+pnpm install
+步骤 B：如缺失 Tauri 插件/前端包，可补装
+Bash
+pnpm tauri add shell
+pnpm tauri add dialog
+pnpm tauri add fs
+pnpm add @xyflow/react react-markdown remark-gfm rehype-highlight highlight.js
+步骤 C：安装 Python Sidecar 依赖
 Bash
 pip install -r src-tauri/py_sidecar/requirements.txt
-步骤 C：(可选) 清理本地旧编译缓存（针对 PowerShell）
-PowerShell
+步骤 D：（可选）清理本地旧前端缓存（PowerShell）
+Powershell
 if (Test-Path .vite) { Remove-Item -Recurse -Force .vite }
-步骤 D：一键拉起 Tauri 桌面客户端预览
+if (Test-Path node_modules/.vite) { Remove-Item -Recurse -Force node_modules/.vite }
+步骤 E：首次或 Rust 依赖变化后，建议更新 Cargo 索引并编译
+Bash
+cd src-tauri
+cargo fetch
+cd ..
+步骤 F：一键拉起 Tauri 桌面客户端预览
 Bash
 pnpm tauri dev
-步骤 E：(可选) 另开终端启动后台硬件级时序调试面板
+步骤 G：（可选）另开终端启动后台硬件级时序调试面板
 Bash
-cd src-tauri/py_sidecar/ && python debugger.py
+cd src-tauri/py_sidecar/
+python debugger.py
+5. 当前运行时行为说明（基于实际开发进展）
+执行 pnpm tauri dev 后：
+会先启动前端 Vite 开发服务器；
+再通过 Cargo 编译并启动 Tauri 桌面应用。
+Tauri 应用启动时：
+Rust lib.rs 会尝试自动启动 src-tauri/py_sidecar/main.py；
+Python Sidecar 默认监听 http://127.0.0.1:5678。
+当前已确认终端会出现类似输出：
+正在启动 Python Sidecar 服务...
+Sidecar 确定的工作目录: ...
+Python Sidecar 启动成功 (PID: xxxx)
+Uvicorn running on http://127.0.0.1:5678
+若这些日志正常出现，说明桌面壳层与 Python Sidecar 拉起链路基本正常。
+6. 与图片附件预览相关的环境说明（新增）
+当前图片附件预览已经切换为 Rust 原生读取 + Data URL 返回 的稳定方案，因此需注意：
+
+Rust 侧必须能成功编译 base64 依赖；
+前端通过 invoke("read_image_as_data_url") 调用 Rust 命令；
+若图片预览异常，应优先查看 PowerShell / Cargo 终端输出，而不是只看浏览器控制台；
+终端中若出现以下日志，说明图片读取命令链路已触发：
+收到图片读取请求: ...
+图片 data URL 生成成功: ...

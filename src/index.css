@@ -1,12 +1,10 @@
 /* src/index.css */
-/* 1. 使用 Tailwind v4 的正确引入指令 */
 @import "tailwindcss";
 
-/* 2. 显式添加针对新创建的 components 文件夹和 React 源码的扫描源 */
 @source "./components/**/*.{ts,tsx}";
 @source "./**/*.{ts,tsx,html}";
 
-/* 3. 优化 Windows 11 风格的滚动条 */
+/* 优化 Windows 11 风格的滚动条 */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -25,9 +23,44 @@
   background: rgba(255, 255, 255, 0.25);
 }
 
+html, body, #root {
+  width: 100%;
+  height: 100%;
+}
+
 body {
   margin: 0;
   font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
   overflow: hidden;
   background-color: #202020;
+  color: #e5e7eb;
+}
+
+/* 提升桌面端拖拽体验 */
+* {
+  box-sizing: border-box;
+}
+
+img {
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* 让文本区域拖拽时视觉更自然 */
+textarea {
+  caret-color: #ffffff;
+}
+
+/* 简单动画增强 */
+@keyframes tangerineFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.tangerine-fade-in {
+  animation: tangerineFadeIn 0.16s ease-out;
 }

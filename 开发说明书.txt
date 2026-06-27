@@ -1,20 +1,61 @@
 ### tangerine 桌面 AI 助手 - AI 上下文说明书
 
 #### 一、 技术栈与核心依赖
-- **壳层**：Tauri 2.0 (Rust) 管理窗口及生命周期，拉起 Python Sidecar 子进程。使用 `@tauri-apps/plugin-shell`。
+- **壳层**：Tauri 2.0 (Rust) 管理窗口及生命周期，拉起 Python Sidecar 子进程。
+- **Tauri 插件**：
+  - `@tauri-apps/plugin-shell`：系统 Shell 能力
+  - `@tauri-apps/plugin-dialog`：原生文件选择器
+  - `@tauri-apps/plugin-fs`：前端文件系统访问（当前图片预览主链路已不再依赖其完成最终显示）
 - **前端**：React 18 + TypeScript + Vite 6 + Tailwind CSS v4。
 - **画布**：`@xyflow/react` (React Flow 新版)。
 - **渲染高亮**：`react-markdown` + `remark-gfm` + `rehype-highlight` + `highlight.js`。
+- **后端图片编码依赖**：Rust 侧使用 `base64`，将本地图片转为 Data URL 返回前端显示。
 
 #### 二、 核心架构与底层逻辑
-1. **SSE 流式传输**：FastAPI `/chat` 返回 `StreamingResponse`。前端 fetch 解析器内置 `extractTextDelta` 管道，支持多格式混吐。
-2. **角色系统**：唯一性重名校验；仅在空白会话可选；提示词通过 API `system` 通道发送，不污染展示气泡。
-3. **Ollama 高抗错**：直连本地 `11434` 端口 `/v1` 兼容网关（OpenAI SDK），抹平 SSE 缓冲差异。
-4. **流式熔断防御**：握手异常时触发 `Try-Catch Stream Breaker`，“抹杀”空临时 AI 消息，追加 `system_err` 气泡。
-5. **UI 加载状态**：字出即隐藏“思考中”；流式结束后淡入 Metadata（提供商、Token 消耗、耗时）。
-6. **工作流画布隔离**：`ChatSession.type` 区分 `"chat"` 与 `"automation"`。数据按 `tangerine_automation_flow_{sessionId}` 隔离存储于 LocalStorage，随会话销毁物理联动删除。
+1. **桌面双后端架构**：
+   - Rust / Tauri 负责窗口、生命周期、插件注册、原生命令暴露、Python Sidecar 拉起。
+   - Python FastAPI 负责 `/chat` 推理流式接口与模型适配。
+2. **SSE 流式传输**：FastAPI `/chat` 返回 `StreamingResponse`。前端 fetch 解析器内置 `extractTextDelta` 管道，支持多格式混吐。
+3. **角色系统**：唯一性重名校验；仅在空白会话可选；提示词通过 API `system` 通道发送，不污染展示气泡。
+4. **Ollama 高抗错**：直连本地 `11434` 端口 `/v1` 兼容网关（OpenAI SDK），抹平 SSE 缓冲差异。
+5. **流式熔断防御**：握手异常时触发 `Try-Catch Stream Breaker`，“抹杀”空临时 AI 消息，追加 `system_err` 气泡。
+6. **UI 加载状态**：字出即隐藏“思考中”；流式结束后淡入 Metadata（提供商、Token 消耗、耗时）。
+7. **工作流画布隔离**：`ChatSession.type` 区分 `"chat"` 与 `"automation"`。数据按 `tangerine_automation_flow_{sessionId}` 隔离存储于 LocalStorage，随会话销毁物理联动删除。
+8. **附件接入方式**：
+   - 支持通过 **Tauri 原生文件选择器** 选择文件；
+   - 支持通过 **Tauri 窗口原生拖放事件** 拖入文件；
+   - 附件数据以绝对路径形式参与后续会话发送。
+9. **图片预览最终稳定方案**：
+   - 前端不再依赖 `convertFileSrc` 直接映射本地路径；
+   - 也不再将图片预览完全依赖前端 `fs.readFile + blob URL`；
+   - 当前稳定实现为：**前端调用 Rust 命令 `read_image_as_data_url`，Rust 直接读取本地图片文件并编码为 `data:image/...;base64,...` 返回前端**；
+   - 该方案用于解决 Tauri WebView 下本地图片灰块、裂图、scope/权限链路不稳定等问题。
+10. **图片预览故障定位思路（已验证）**：
+   - 先前问题不在图片类型识别；
+   - 主要失败点发生在 WebView 对本地路径资源加载、或前端 fs 读取授权/作用域链路；
+   - 改为 Rust 直读后，图片缩略图与预览恢复正常。
 
-#### 三、 画布核心组件与交互（Pointer 模拟拖拽）
+#### 三、 文件与图片处理逻辑（新增补充）
+1. **文件选择**：
+   - 通过 `@tauri-apps/plugin-dialog` 的 `open()` 打开系统原生选择器；
+   - 解决浏览器风格文件框在桌面环境中的兼容和显示问题。
+2. **文件拖拽**：
+   - 通过 `@tauri-apps/api/window` 的 `onDragDropEvent` 监听窗口级拖放；
+   - 避免依赖浏览器 `dataTransfer.files` 在桌面端路径不稳定的问题。
+3. **附件识别**：
+   - 前端通过 `getFileType(fileName)` 将附件分为 `image / audio / code / office / other`。
+4. **图片预览生成**：
+   - 图片文件会在进入附件列表时调用 Rust 命令生成 `previewUrl`；
+   - `previewUrl` 当前为 Data URL，可直接赋值给 `<img src>`；
+   - 若失败则写入 `previewError`，供前端阻断预览并提示。
+5. **大图预览**：
+   - 点击已成功生成缩略图的图片附件，可进入大图预览层；
+   - 若 `previewUrl` 缺失，则不会进入预览，而是走失败提示逻辑。
+6. **发送阶段**：
+   - 聊天请求发送给 Python Sidecar 时，仍携带原始绝对路径 `file_paths`；
+   - 图片缩略图显示与模型侧文件处理是两条链路，互不冲突。
+
+#### 四、 画布核心组件与交互（Pointer 模拟拖拽）
 - **拖拽机制**：因 Tauri WebView 兼容性，放弃原生 HTML5 拖拽，全量采用 **Pointer 事件模拟**（`onPointerDown` -> `window pointermove` -> `window pointerup` -> `screenToFlowPosition` -> `setNodes`）。
 - **类目化生成**：底部工具栏仅有“角色/工具/开关/集合/对话/硬件/定时”七大类目按钮。拖入画布后，在节点**内部下拉选单**选择具体细分项。
 - **节点特征**：
@@ -31,29 +72,61 @@
   * **彻底删除 (Delete/Backspace)**：级联删除集合节点及其内部吸附的子孙节点与连线。
   * **复制粘贴 (Ctrl+C / Ctrl+V)**：利用 `getDescendantNodeIds` 深度复制集合及其内部所有子节点和关联 edges，粘贴时以鼠标流坐标为中心计算 delta offset 偏移量，并赋予全新唯一抗冲突 ID。
 
-#### 四、 项目目录结构
+#### 五、 已确认的桌面端开发结论（新增）
+1. Windows 11 下当前问题场景**不是手机式系统弹窗授权模型**。
+2. Tauri 前端本地文件访问的关键限制点通常在：
+   - capability
+   - fs permission
+   - fs scope
+   - WebView 本地资源映射方式
+3. 对于聊天输入区图片缩略图这类高频预览功能，**Rust 直读文件并返回 Data URL** 是当前项目中更稳、更易维护、更便于定位问题的方案。
+4. Rust 终端输出比前端控制台更适合作为 Tauri 本地文件读取链路的调试依据。
+
+#### 六、 项目目录结构
 ```text
 tangerine/
 ├── src/
 │   ├── components/
-│   │   ├── CodeBlock.tsx          # 复制代码块（支持 fontSize）
-│   │   ├── MarkdownMessage.tsx    # Markdown 渲染（自适应 fontSize）
-│   │   ├── MessageItem.tsx        # 消息气泡、Tavily 联网源折叠抽屉、元数据淡入
-│   │   ├── ChatInput.tsx          # 输入框、附件预览、模型分类下拉框
-│   │   ├── Sidebar.tsx            # 侧边栏（区分普通/自动化会话列表）
-│   │   ├── SettingsModal.tsx      # 设置多 Tab（云端/本地/格式），Ollama 同步
-│   │   ├── RolesModal.tsx         # 角色编辑与持久化
-│   │   ├── AutomationWorkspace.tsx # 画布入口（外层容器与 ReactFlowProvider）
-│   │   └── automation/            # 画布解耦模块
-│   │       ├── automationConstants.ts | automationTypes.ts | automationStorage.ts
-│   │       ├── automationNodeUtils.ts # 纯函数（ID生成、快照、集合吸附、子孙查找）
-│   │       ├── AutomationNodes.tsx    # 自定义节点组件及 nodeTypes 注册表
-│   │       ├── AutomationToolbar.tsx  # 底部悬浮类目 Pointer 拖拽栏
-│   │       ├── DragGhost.tsx | SystemTimeBadge.tsx | FlowEditor.tsx（主画布编辑器）
-│   ├── types/ chat.ts             # Role 接口、ChatSession 扩展（roleId, type）
-│   └── App.tsx                    # 主视图分流、侧边栏删除联动销毁画布数据
+│   │   ├── CodeBlock.tsx               # Markdown 代码块渲染与复制逻辑，支持字体大小联动
+│   │   ├── MarkdownMessage.tsx         # Markdown 内容渲染层，处理 GFM、高亮、字体大小适配
+│   │   ├── MessageItem.tsx             # 单条消息气泡；含 AI/用户/system_err 展示、来源折叠抽屉、元数据淡入
+│   │   ├── ChatInput.tsx               # 聊天输入区；负责文本输入、附件缩略图列表、图片点击预览、模型下拉、发送触发
+│   │   ├── Sidebar.tsx                 # 左侧会话栏；区分普通对话/自动化流程会话，支持切换、删除
+│   │   ├── SettingsModal.tsx           # 设置面板；多 Tab 配置云端/本地模型、显示格式，含 Ollama 模型同步逻辑
+│   │   ├── RolesModal.tsx              # 角色管理弹窗；负责角色增删改查与 LocalStorage 持久化
+│   │   ├── AutomationWorkspace.tsx     # 自动化画布入口；负责画布外层容器与 ReactFlowProvider 注入
+│   │   └── automation/                 # 自动化工作流解耦模块目录
+│   │       ├── automationConstants.ts  # 自动化画布常量定义
+│   │       ├── automationTypes.ts      # 自动化节点/边/快照等 TS 类型定义
+│   │       ├── automationStorage.ts    # 自动化画布 LocalStorage 读写封装
+│   │       ├── automationNodeUtils.ts  # 纯函数工具集：ID 生成、快照深拷贝、集合吸附、子孙节点查找等
+│   │       ├── AutomationNodes.tsx     # 自定义节点组件集合及 nodeTypes 注册表
+│   │       ├── AutomationToolbar.tsx   # 底部悬浮类目工具栏；Pointer 模拟拖拽起点
+│   │       ├── DragGhost.tsx           # 拖拽时的幽灵预览组件
+│   │       ├── SystemTimeBadge.tsx     # 画布上的系统时间徽标显示
+│   │       └── FlowEditor.tsx          # 主画布编辑器；负责节点、边、快捷键、复制粘贴、撤销重做等核心交互
+│   ├── hooks/
+│   │   └── useChatManager.ts           # 聊天核心状态管理 Hook；负责会话状态、流式响应、附件合并、图片预览构建、拖放监听、发送逻辑
+│   ├── types/
+│   │   └── chat.ts                     # 聊天域类型定义；包含 Message / ChatSession / Role / AttachmentFile 及文件类型推断工具函数
+│   └── App.tsx                         # 应用主入口；负责聊天页/自动化页主视图分流与会话级联删除联动
 └── src-tauri/
+    ├── capabilities/
+    │   └── default.json                # Tauri capability 配置；定义主窗口允许使用的 core / dialog / shell / fs 等权限
+    ├── src/
+    │   └── lib.rs                      # Rust 桌面主入口；注册插件、启动 Python Sidecar、暴露 read_image_as_data_url 命令
+    ├── Cargo.toml                      # Rust 依赖清单；含 tauri、dialog、shell、fs、base64 等依赖
+    ├── tauri.conf.json                 # Tauri 应用配置；窗口参数、打包信息、前端开发/构建入口
     └── py_sidecar/
-        ├── main.py                # FastAPI 服务：SSE、Ollama直连、Gemini/DeepSeek双通路
-        ├── debugger.py            # 实时调试面板（时序上下文、Output、Tavily检索）
-        └── requirements.txt       # Python 依赖
+        ├── main.py                     # FastAPI 服务：SSE、Ollama 直连、Gemini/DeepSeek 双通路
+        ├── debugger.py                 # 实时调试面板（时序上下文、Output、Tavily 检索）
+        └── requirements.txt            # Python 依赖列表
+
+七、 当前关键状态总结（基于最新进展）
+Python Sidecar 自动拉起正常。
+Tauri 主窗口启动正常。
+会话、角色、自动化工作流本地持久化机制已存在。
+文件选择与拖放已接入桌面原生能力。
+图片附件缩略图与大图预览问题已通过 Rust Data URL 方案修复并恢复正常。
+后续若继续扩展文件预览、音频预览、Office 文件信息读取，优先考虑沿用“Rust 原生读取 + 前端展示”的桌面稳定链路。
+

@@ -23,19 +23,23 @@ export interface ChatSession {
   title: string;
   messages: Message[];
   roleId?: string; // 绑定到当前会话的角色 ID
-  type?: "chat" | "automation"; // 👈 新增：标记该会话是普通对话还是自动化流程页面
+  type?: "chat" | "automation"; // 标记该会话是普通对话还是自动化流程页面
 }
 
 export interface Role {
   id: string;
   name: string;
   systemPrompt: string;
+  provider?: string; // 角色绑定的模型提供商
+  model?: string;    // 角色绑定的模型名称
 }
 
 export interface AttachmentFile {
   name: string;
   path: string;
   type: 'image' | 'audio' | 'code' | 'office' | 'other';
+  previewUrl?: string; // 图片文件的本地预览地址（这里将使用 data URL）
+  previewError?: string; // 图片预览失败原因
 }
 
 // 辅助函数：根据文件名推断附件卡片展示类型
@@ -43,9 +47,20 @@ export function getFileType(fileName: string): 'image' | 'audio' | 'code' | 'off
   const ext = fileName.split('.').pop()?.toLowerCase() || '';
   if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext)) return 'image';
   if (['mp3', 'wav', 'ogg', 'm4a'].includes(ext)) return 'audio';
-  if (['py', 'js', 'ts', 'tsx', 'jsx', 'rs', 'go', 'cpp', 'c', 'html', 'css', 'json', 'yaml', 'sh'].includes(ext)) return 'code';
-  if (['docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'pdf', 'rtf', 'epub', 'mobi'].includes(ext)) return 'office';
+  if (['py', 'js', 'ts', 'tsx', 'jsx', 'rs', 'go', 'cpp', 'c', 'html', 'css', 'json', 'yaml', 'yml', 'sh'].includes(ext)) return 'code';
+  if (['docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'pdf', 'rtf', 'epub', 'mobi', 'csv'].includes(ext)) return 'office';
   return 'other';
+}
+
+// 辅助函数：根据文件名获取图片 MIME 类型
+export function getImageMimeType(fileName: string): string {
+  const ext = fileName.split('.').pop()?.toLowerCase() || '';
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+  if (ext === 'png') return 'image/png';
+  if (ext === 'gif') return 'image/gif';
+  if (ext === 'webp') return 'image/webp';
+  if (ext === 'bmp') return 'image/bmp';
+  return 'application/octet-stream';
 }
 
 // 辅助函数：将时间戳格式化为 12 小时制

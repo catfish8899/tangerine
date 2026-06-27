@@ -121,8 +121,38 @@ def process_file_paths(file_paths: List[str]) -> tuple:
 
     return text_context, multimodal_contents
 
+@app.post("/select_files")
 async def select_files():
-    pass
+    """
+    打开系统原生文件选择框并返回选中的绝对路径列表。
+    这里沿用前端当前 fetch('/select_files') 的协议，不改现有业务逻辑。
+    """
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        # 创建隐藏根窗口，避免弹出多余 Tk 主窗体
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+
+        file_paths = filedialog.askopenfilenames(
+            title="选择要附加到对话中的文件",
+            filetypes=[
+                ("支持的文件", "*.txt *.md *.json *.yaml *.yml *.py *.js *.ts *.tsx *.jsx *.html *.css *.rs *.go *.java *.cpp *.c *.h *.hpp *.cs *.php *.sh *.bat *.ps1 *.sql *.xml *.csv *.jpg *.jpeg *.png *.gif *.webp *.bmp *.mp3 *.wav *.ogg *.m4a *.pdf *.doc *.docx *.xls *.xlsx *.ppt *.pptx"),
+                ("所有文件", "*.*")
+            ]
+        )
+
+        try:
+            root.destroy()
+        except Exception:
+            pass
+
+        normalized_paths = [os.path.abspath(path) for path in file_paths] if file_paths else []
+        return {"file_paths": normalized_paths}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"打开文件选择框失败: {str(e)}")
 
 @app.get("/api/ollama/status")
 async def get_ollama_status():

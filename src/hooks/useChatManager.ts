@@ -1,6 +1,9 @@
 // src/hooks/useChatManager.ts
 // 负责处理所有的聊天状态、流式请求和业务逻辑
 import { useState, useRef, useEffect } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Message, ChatSession, AttachmentFile, getFileType, Role } from "../types/chat";
 import { ApiProviderConfig } from "../components/SettingsModal";
 
@@ -32,9 +35,12 @@ export function useChatManager() {
   const [selectedModel, setSelectedModel] = useState<string>("deepseek-v4-flash");
   const [availableModels, setAvailableModels] = useState<string[]>(["deepseek-v4-flash", "deepseek-v4-pro"]);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
+  const [showRoleDropdown, setShowRoleDropdown] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showRoles, setShowRoles] = useState(false);
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+  const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
 
   const [webSearchMode, setWebSearchMode] = useState<"off" | "direct" | "agent">("off");
 
@@ -95,8 +101,32 @@ export function useChatManager() {
       }
     };
 
+    const handleRolesChanged = () => {
+      const savedRoles = localStorage.getItem(ROLES_STORAGE_KEY);
+      if (savedRoles) {
+        try {
+          setRoles(JSON.parse(savedRoles));
+        } catch (e) {
+          console.error("同步角色数据失败：", e);
+        }
+      } else {
+        setRoles([]);
+      }
+    };
+
+    const handleApiSettingsChanged = () => {
+      syncModelsFromSettings();
+    };
+
     window.addEventListener("storage", handleStorageChange);
-    return () => window.removeEventListener("storage", handleStorageChange);
+    window.addEventListener("tangerine_roles_changed", handleRolesChanged as EventListener);
+    window.addEventListener("tangerine_api_settings_changed", handleApiSettingsChanged as EventListener);
+
+    return () => {
+      window.removeEventListener("storage", handleStorageChange);
+      window.removeEventListener("tangerine_roles_changed", handleRolesChanged as EventListener);
+      window.removeEventListener("tangerine_api_settings_changed", handleApiSettingsChanged as EventListener);
+    };
   }, []);
 
   useEffect(() => {
@@ -114,6 +144,8 @@ export function useChatManager() {
       } catch (e) {
         console.error("加载角色数据失败：", e);
       }
+    } else {
+      setRoles([]);
     }
   }, [showRoles]);
 
@@ -144,6 +176,91 @@ export function useChatManager() {
     setAvailableModels(["deepseek-v4-flash", "deepseek-v4-pro"]);
   };
 
+  const getRoleResolvedModelInfo = (session?: ChatSession) => {
+    const fallbackModel = selectedModel;
+    const fallbackProvider = getProviderByModel(fallbackModel);
+
+    if (!session?.roleId) {
+      return {
+        model: fallbackModel,
+        provider: fallbackProvider
+      };
+    }
+
+    const role = roles.find(r => r.id === session.roleId);
+    if (role?.model?.trim()) {
+      return {
+        model: role.model.trim(),
+        provider: role.provider?.trim() || getProviderByModel(role.model.trim())
+      };
+    }
+
+    return {
+      model: fallbackModel,
+      provider: fallbackProvider
+    };
+  };
+
+  // 通过 Rust 命令直接读取图片并返回 data URL
+  const createImagePreview = async (path: string, name: string): Promise<{ previewUrl?: string; previewError?: string }> => {
+    try {
+      const previewUrl = await invoke<string>("read_image_as_data_url", { path });
+      return { previewUrl };
+    } catch (error: any) {
+      const message = error?.message || String(error) || "未知错误";
+      console.error("调用 Rust 图片读取命令失败：", { path, name, error });
+      return {
+        previewError: `图片读取失败：${message}`
+      };
+    }
+  };
+
+  // 根据本地绝对路径构建附件对象
+  const buildAttachmentFromPath = async (path: string): Promise<AttachmentFile> => {
+    const parts = path.split(/[\\/]/);
+    const name = parts[parts.length - 1] || "未命名文件";
+    const type = getFileType(name);
+
+    const attachment: AttachmentFile = {
+      name,
+      path,
+      type
+    };
+
+    if (type === "image") {
+      const previewResult = await createImagePreview(path, name);
+      attachment.previewUrl = previewResult.previewUrl;
+      attachment.previewError = previewResult.previewError;
+    }
+
+    return attachment;
+  };
+
+  const mergeAttachments = async (incomingPaths: string[]) => {
+    const normalizedPaths = incomingPaths
+      .filter(Boolean)
+      .map(p => p.trim())
+      .filter(Boolean);
+
+    if (normalizedPaths.length === 0) return;
+
+    const uniqueIncomingPaths = Array.from(new Set(normalizedPaths));
+    const newAttachments = await Promise.all(uniqueIncomingPaths.map(buildAttachmentFromPath));
+
+    const failedImages = newAttachments.filter(file => file.type === "image" && !file.previewUrl);
+    if (failedImages.length > 0) {
+      console.warn("以下图片未能生成预览：", failedImages);
+      setWarningMessage("⚠️ 某些图片未能生成预览，请检查 Rust 终端输出。");
+      setTimeout(() => setWarningMessage(null), 4000);
+    }
+
+    setAttachments(prev => {
+      const existingPaths = new Set(prev.map(a => a.path));
+      const filteredNew = newAttachments.filter(a => !existingPaths.has(a.path));
+      return [...prev, ...filteredNew];
+    });
+  };
+
   useEffect(() => {
     syncModelsFromSettings();
   }, [showSettings]);
@@ -155,6 +272,55 @@ export function useChatManager() {
     }
     prevMessagesCountRef.current = currentMessagesCount;
   }, [activeSession?.messages?.length]);
+
+  useEffect(() => {
+    const closeDropdowns = () => {
+      setShowModelDropdown(false);
+      setShowRoleDropdown(false);
+    };
+
+    window.addEventListener("click", closeDropdowns);
+    return () => window.removeEventListener("click", closeDropdowns);
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    const registerDragDropListener = async () => {
+      try {
+        const currentWindow = getCurrentWindow();
+        unlisten = await currentWindow.onDragDropEvent(async (event) => {
+          if (event.payload.type === "enter" || event.payload.type === "over") {
+            setIsDraggingFiles(true);
+            return;
+          }
+
+          if (event.payload.type === "leave") {
+            setIsDraggingFiles(false);
+            return;
+          }
+
+          if (event.payload.type === "drop") {
+            setIsDraggingFiles(false);
+            const paths = event.payload.paths || [];
+            if (paths.length > 0) {
+              await mergeAttachments(paths);
+            }
+          }
+        });
+      } catch (error) {
+        console.error("注册 Tauri 原生拖放监听失败：", error);
+      }
+    };
+
+    registerDragDropListener();
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+    };
+  }, []);
 
   const validateAlternatingOrder = (messages: Message[]): boolean => {
     const filtered = messages.filter(m => m.sender !== "system_err");
@@ -212,6 +378,8 @@ export function useChatManager() {
     };
     setSessions(prev => [newSession, ...prev]);
     setActiveSessionId(newSession.id);
+    setShowModelDropdown(false);
+    setShowRoleDropdown(false);
   };
 
   const handleCreateAutomationSession = () => {
@@ -270,29 +438,62 @@ export function useChatManager() {
 
   const handleSelectFiles = async () => {
     try {
-      const response = await fetch("http://127.0.0.1:5678/select_files", { method: "POST" });
-      if (response.ok) {
-        const data = await response.json();
-        const selectedPaths: string[] = data.file_paths || [];
-        const newAttachments: AttachmentFile[] = selectedPaths.map(p => {
-          const parts = p.split(/[\\/]/);
-          const name = parts[parts.length - 1] || "未命名文件";
-          return { name, path: p, type: getFileType(name) };
-        });
+      const selected = await open({
+        multiple: true,
+        directory: false,
+        title: "选择要附加到对话中的文件",
+        filters: [
+          {
+            name: "支持的文件",
+            extensions: [
+              "txt", "md", "json", "yaml", "yml", "py", "js", "ts", "tsx", "jsx", "html", "css",
+              "rs", "go", "java", "cpp", "c", "h", "hpp", "cs", "php", "sh", "bat", "ps1", "sql", "xml", "csv",
+              "jpg", "jpeg", "png", "gif", "webp", "bmp",
+              "mp3", "wav", "ogg", "m4a",
+              "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"
+            ]
+          },
+          {
+            name: "所有文件",
+            extensions: ["*"]
+          }
+        ]
+      });
 
-        setAttachments(prev => {
-          const existingPaths = prev.map(a => a.path);
-          const filteredNew = newAttachments.filter(a => !existingPaths.includes(a.path));
-          return [...prev, ...filteredNew];
-        });
-      }
+      if (!selected) return;
+
+      const paths = Array.isArray(selected) ? selected : [selected];
+      await mergeAttachments(paths);
     } catch (e) {
-      console.error("调用 Tauri 选择文件出错:", e);
+      console.error("调用 Tauri 原生文件选择器失败:", e);
+      setWarningMessage("⚠️ 打开系统文件选择器失败。");
+      setTimeout(() => setWarningMessage(null), 3000);
     }
+  };
+
+  const handleDropFiles = async (paths: string[]) => {
+    await mergeAttachments(paths);
+    setIsDraggingFiles(false);
   };
 
   const handleRemoveAttachment = (idx: number) => {
     setAttachments(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const handlePreviewImage = (file: AttachmentFile) => {
+    if (file.type !== "image" || !file.previewUrl) {
+      console.warn("当前附件不是可预览图片或预览生成失败：", file);
+      if (file.previewError) {
+        setWarningMessage(`⚠️ ${file.previewError}`);
+        setTimeout(() => setWarningMessage(null), 4000);
+      }
+      return;
+    }
+    setPreviewImage({ url: file.previewUrl, name: file.name });
+  };
+
+  const handleCloseImagePreview = () => {
+    setPreviewImage(null);
   };
 
   const handleSelectRole = (roleId: string) => {
@@ -387,14 +588,14 @@ export function useChatManager() {
     setIsLoading(true);
 
     const streamAiMessageId = (Date.now() + 1).toString();
-    const currentProvider = getProviderByModel(selectedModel);
+    const resolvedModelInfo = getRoleResolvedModelInfo(session);
 
     const initialAiResponse: Message = {
       id: streamAiMessageId,
       sender: "ai",
       text: "",
-      provider: currentProvider,
-      model: selectedModel,
+      provider: resolvedModelInfo.provider,
+      model: resolvedModelInfo.model,
       timestamp: Date.now(),
       sources: []
     };
@@ -415,7 +616,14 @@ export function useChatManager() {
       return { ...s, messages: [...updatedMessages, initialAiResponse] };
     }));
 
-    await executeStreamChat(precedingMessages, targetMsg.filePaths || [], getActiveSystemPrompt(session), streamAiMessageId, messageId);
+    await executeStreamChat(
+      precedingMessages,
+      targetMsg.filePaths || [],
+      getActiveSystemPrompt(session),
+      streamAiMessageId,
+      messageId,
+      session
+    );
   };
 
   const handleSendMessage = async (customText?: any, filePathsOverride?: string[]) => {
@@ -458,16 +666,18 @@ export function useChatManager() {
     setInputText("");
     setAttachments([]);
     setIsLoading(true);
+    setShowModelDropdown(false);
+    setShowRoleDropdown(false);
 
     const streamAiMessageId = (Date.now() + 1).toString();
-    const currentProvider = getProviderByModel(selectedModel);
+    const resolvedModelInfo = getRoleResolvedModelInfo(currentSessionSnapshot);
 
     const initialAiResponse: Message = {
       id: streamAiMessageId,
       sender: "ai",
       text: "",
-      provider: currentProvider,
-      model: selectedModel,
+      provider: resolvedModelInfo.provider,
+      model: resolvedModelInfo.model,
       timestamp: Date.now(),
       sources: []
     };
@@ -479,11 +689,24 @@ export function useChatManager() {
       return session;
     }));
 
-    await executeStreamChat(currentMessages, finalFilePaths, getActiveSystemPrompt(currentSessionSnapshot), streamAiMessageId);
+    await executeStreamChat(
+      currentMessages,
+      finalFilePaths,
+      getActiveSystemPrompt(currentSessionSnapshot),
+      streamAiMessageId,
+      undefined,
+      currentSessionSnapshot
+    );
   };
 
-  // 内部辅助函数：处理流式读取及错误熔断
-  const executeStreamChat = async (messageContext: Message[], filePathsToSend: string[], finalSystemPrompt: string, streamAiMessageId: string, branchParentId?: string) => {
+  const executeStreamChat = async (
+    messageContext: Message[],
+    filePathsToSend: string[],
+    finalSystemPrompt: string,
+    streamAiMessageId: string,
+    branchParentId?: string,
+    sessionSnapshot?: ChatSession
+  ) => {
     try {
       const apiMessages = messageContext
         .filter(m => m.sender !== "system_err")
@@ -492,12 +715,14 @@ export function useChatManager() {
           content: m.text
         }));
 
+      const resolvedModelInfo = getRoleResolvedModelInfo(sessionSnapshot || activeSession);
+
       const response = await fetch("http://127.0.0.1:5678/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: selectedModel,
-          provider: getProviderByModel(selectedModel),
+          model: resolvedModelInfo.model,
+          provider: resolvedModelInfo.provider,
           messages: [{ role: "system", content: finalSystemPrompt }, ...apiMessages],
           file_paths: filePathsToSend,
           web_search: webSearchMode
@@ -628,17 +853,59 @@ export function useChatManager() {
 
   return {
     state: {
-      sessions, activeSessionId, inputText, isLoading, attachments, selectedModel, availableModels,
-      showModelDropdown, showSettings, showRoles, warningMessage, webSearchMode, roles, chatFontSize,
-      contextMenu, msgContextMenu, activeSession, activeRole, isActiveSessionEmpty
+      sessions,
+      activeSessionId,
+      inputText,
+      isLoading,
+      attachments,
+      selectedModel,
+      availableModels,
+      showModelDropdown,
+      showRoleDropdown,
+      showSettings,
+      showRoles,
+      warningMessage,
+      webSearchMode,
+      roles,
+      chatFontSize,
+      contextMenu,
+      msgContextMenu,
+      activeSession,
+      activeRole,
+      isActiveSessionEmpty,
+      isDraggingFiles,
+      previewImage
     },
     refs: { messagesEndRef },
     actions: {
-      setSessions, setActiveSessionId, setInputText, setSelectedModel, setShowModelDropdown, setShowSettings,
-      setShowRoles, setWarningMessage, setWebSearchMode, setContextMenu, setMsgContextMenu,
-      handleCreateSession, handleCreateAutomationSession, handleContextMenu, handleMsgContextMenu,
-      handleSaveEdit, handleCancelEdit, handleSelectFiles, handleRemoveAttachment, handleSelectRole,
-      handleSwitchBranch, handleResendMessage, handleSendMessage
+      setSessions,
+      setActiveSessionId,
+      setInputText,
+      setSelectedModel,
+      setShowModelDropdown,
+      setShowRoleDropdown,
+      setShowSettings,
+      setShowRoles,
+      setWarningMessage,
+      setWebSearchMode,
+      setContextMenu,
+      setMsgContextMenu,
+      setIsDraggingFiles,
+      handleCreateSession,
+      handleCreateAutomationSession,
+      handleContextMenu,
+      handleMsgContextMenu,
+      handleSaveEdit,
+      handleCancelEdit,
+      handleSelectFiles,
+      handleDropFiles,
+      handleRemoveAttachment,
+      handlePreviewImage,
+      handleCloseImagePreview,
+      handleSelectRole,
+      handleSwitchBranch,
+      handleResendMessage,
+      handleSendMessage
     }
   };
 }

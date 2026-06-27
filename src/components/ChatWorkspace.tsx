@@ -1,6 +1,6 @@
 // src/components/ChatWorkspace.tsx
 import React from "react";
-import { AlertTriangle, UserSquare2, Sparkles } from "lucide-react";
+import { AlertTriangle, Sparkles, Upload, Image as ImageIcon, X } from "lucide-react";
 import MessageItem from "./MessageItem";
 import ChatInput from "./ChatInput";
 
@@ -12,15 +12,40 @@ interface ChatWorkspaceProps {
 
 export default function ChatWorkspace({ state, actions, refs }: ChatWorkspaceProps) {
   const {
-    warningMessage, activeRole, isActiveSessionEmpty, activeSession, roles,
-    chatFontSize, isLoading, inputText, attachments, selectedModel,
-    availableModels, showModelDropdown, webSearchMode
+    warningMessage,
+    activeRole,
+    isActiveSessionEmpty,
+    activeSession,
+    roles,
+    chatFontSize,
+    isLoading,
+    inputText,
+    attachments,
+    selectedModel,
+    availableModels,
+    showModelDropdown,
+    webSearchMode,
+    showRoleDropdown,
+    isDraggingFiles,
+    previewImage
   } = state;
 
   const {
-    handleSelectRole, handleMsgContextMenu, handleSaveEdit, handleCancelEdit,
-    handleSwitchBranch, setInputText, handleSelectFiles, handleRemoveAttachment,
-    setSelectedModel, setShowModelDropdown, setWebSearchMode, handleSendMessage
+    handleSelectRole,
+    handleMsgContextMenu,
+    handleSaveEdit,
+    handleCancelEdit,
+    handleSwitchBranch,
+    setInputText,
+    handleSelectFiles,
+    handleRemoveAttachment,
+    handlePreviewImage,
+    handleCloseImagePreview,
+    setSelectedModel,
+    setShowModelDropdown,
+    setWebSearchMode,
+    handleSendMessage,
+    setShowRoleDropdown
   } = actions;
 
   const { messagesEndRef } = refs;
@@ -36,83 +61,73 @@ export default function ChatWorkspace({ state, actions, refs }: ChatWorkspacePro
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto px-12 py-6">
+      <div
+        className={`relative flex-1 overflow-y-auto px-6 md:px-10 py-6 transition-all ${
+          isDraggingFiles ? "bg-sky-500/[0.03]" : ""
+        }`}
+      >
+        {isDraggingFiles && (
+          <div className="absolute inset-4 z-20 rounded-3xl border-2 border-dashed border-sky-400/50 bg-sky-500/[0.06] backdrop-blur-sm flex items-center justify-center pointer-events-none">
+            <div className="text-center">
+              <div className="w-14 h-14 rounded-2xl bg-sky-500/10 border border-sky-400/20 flex items-center justify-center mx-auto mb-3">
+                <Upload size={24} className="text-sky-300" />
+              </div>
+              <div className="text-sm font-semibold text-sky-200">拖拽文件到这里即可附加到本轮对话</div>
+              <div className="text-xs text-sky-200/70 mt-1">支持图片、音频、代码与 Office / PDF 文档</div>
+            </div>
+          </div>
+        )}
+
         <div className="max-w-3xl mx-auto space-y-6">
 
-          {activeRole && (
-            <div className="w-full rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-5 py-4 shadow-[0_0_24px_rgba(245,158,11,0.04)] backdrop-blur-sm">
-              <div className="flex items-center justify-between gap-3 mb-2">
+          {activeRole && activeSession.messages.length > 0 && (
+            <div className="w-full rounded-xl border border-amber-500/20 bg-amber-500/[0.05] px-4 py-3 shadow-[0_0_24px_rgba(245,158,11,0.035)] backdrop-blur-sm">
+              <div className="flex items-center justify-between gap-3 mb-1.5">
                 <div className="flex items-center gap-2 text-amber-400">
-                  <UserSquare2 size={15} />
-                  <span className="text-xs font-bold tracking-wide">
-                    已加载角色系统设定：{activeRole.name}
+                  <Sparkles size={14} />
+                  <span className="text-[11px] font-bold tracking-wide">
+                    当前会话角色：{activeRole.name}
                   </span>
                 </div>
-
-                {isActiveSessionEmpty && (
-                  <button
-                    onClick={() => handleSelectRole("")}
-                    className="text-[10px] text-gray-500 hover:text-red-400 transition-colors"
-                  >
-                    卸载设定
-                  </button>
-                )}
               </div>
 
-              <div className="pl-6 text-[12px] text-gray-400 leading-relaxed whitespace-pre-wrap italic select-text">
+              <div className="text-[11px] text-gray-400 leading-relaxed whitespace-pre-wrap italic select-text line-clamp-2">
                 “{activeRole.systemPrompt}”
               </div>
             </div>
           )}
 
           {activeSession.messages.length === 0 ? (
-            <div className="min-h-[calc(100vh-260px)] flex flex-col items-center justify-center text-center opacity-95">
-              {roles.length > 0 ? (
-                <div className="w-full max-w-2xl">
-                  <div className="w-12 h-12 rounded-xl bg-[#2e2e2e] flex items-center justify-center mb-4 border border-[#3e3e3e] mx-auto">
-                    <Sparkles size={22} className="text-amber-400" />
-                  </div>
-                  <h2 className="text-base font-semibold text-white tracking-wide mb-2">
-                    选择一个角色开始对话 🧐
-                  </h2>
-                  <p className="text-xs text-gray-500 mb-5">
-                    只有空白对话可以选择角色；对话产生内容后将锁定当前角色。
-                  </p>
+            <div className="min-h-[calc(100vh-280px)] flex flex-col items-center justify-center text-center opacity-95">
+              <div className="w-14 h-14 rounded-2xl bg-[#2b2b2b] flex items-center justify-center mb-4 border border-[#3e3e3e] shadow-inner">
+                <Sparkles size={24} className="text-amber-400" />
+              </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {roles.map((role: any) => (
-                      <button
-                        key={role.id}
-                        onClick={() => handleSelectRole(role.id)}
-                        className={`text-left rounded-xl border p-4 transition-all ${
-                          activeSession.roleId === role.id
-                            ? "bg-amber-500/[0.08] border-amber-500/50 text-amber-300"
-                            : "bg-[#1b1b1b]/80 border-[#333] text-gray-300 hover:border-amber-500/30 hover:bg-[#242424]"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className={`w-2 h-2 rounded-full ${activeSession.roleId === role.id ? "bg-amber-400" : "bg-gray-600"}`} />
-                          <span className="text-xs font-bold truncate">{role.name}</span>
-                        </div>
-                        <div className="text-[11px] text-gray-500 line-clamp-3 leading-relaxed">
-                          {role.systemPrompt}
-                        </div>
-                      </button>
-                    ))}
+              <h2 className="text-base font-semibold text-white tracking-wide mb-2">
+                开始一段新对话
+              </h2>
+
+              <p className="text-xs text-gray-500 max-w-md leading-relaxed">
+                你可以直接输入消息，也可以通过输入框左下区域选择附件、联网模式与角色设定。
+                {roles.length > 0
+                  ? " 当前支持在空白会话中为该对话绑定角色。"
+                  : " 也可以先到侧边栏“我的角色”创建专属角色。"}
+              </p>
+
+              <div className="mt-5 flex items-center gap-2 px-3 py-2 rounded-xl border border-[#333] bg-[#1f1f1f] text-[11px] text-gray-400">
+                <ImageIcon size={14} className="text-sky-400" />
+                也支持将文件直接拖拽到聊天区域
+              </div>
+
+              {activeRole && (
+                <div className="mt-5 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3 max-w-lg w-full">
+                  <div className="text-[11px] text-amber-300 font-semibold mb-1">
+                    已预选角色：{activeRole.name}
+                  </div>
+                  <div className="text-[11px] text-gray-400 leading-relaxed line-clamp-3">
+                    {activeRole.systemPrompt}
                   </div>
                 </div>
-              ) : (
-                <>
-                  <div className="w-12 h-12 rounded-xl bg-[#2e2e2e] flex items-center justify-center mb-4 border border-[#3e3e3e]">
-                    <span className="text-2xl">💬</span>
-                  </div>
-                  <h2 className="text-base font-semibold text-white tracking-wide">
-                    等待用户输入...📓✍️🧐
-                  </h2>
-                  <p className="text-xs text-gray-500 mt-2">
-                    也可以点击侧边栏“我的角色”创建专属系统提示词。
-                  </p>
-                </>
               )}
             </div>
           ) : (
@@ -143,6 +158,7 @@ export default function ChatWorkspace({ state, actions, refs }: ChatWorkspacePro
         attachments={attachments}
         onSelectFiles={handleSelectFiles}
         onRemoveAttachment={handleRemoveAttachment}
+        onPreviewImage={handlePreviewImage}
         selectedModel={selectedModel}
         setSelectedModel={setSelectedModel}
         availableModels={availableModels}
@@ -151,7 +167,46 @@ export default function ChatWorkspace({ state, actions, refs }: ChatWorkspacePro
         webSearchMode={webSearchMode}
         setWebSearchMode={setWebSearchMode}
         onSendMessage={handleSendMessage}
+        roles={roles}
+        activeRole={activeRole}
+        activeRoleId={activeSession?.roleId}
+        canSelectRole={isActiveSessionEmpty}
+        showRoleDropdown={showRoleDropdown}
+        setShowRoleDropdown={setShowRoleDropdown}
+        onSelectRole={handleSelectRole}
       />
+
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-[10000] bg-black/78 backdrop-blur-sm flex items-center justify-center p-6"
+          onClick={handleCloseImagePreview}
+        >
+          <div
+            className="relative max-w-[92vw] max-h-[90vh] animate-in fade-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={handleCloseImagePreview}
+              className="absolute -top-3 -right-3 w-10 h-10 rounded-full bg-[#202020]/95 border border-white/10 text-white hover:text-red-400 flex items-center justify-center shadow-lg cursor-pointer"
+              title="关闭预览"
+            >
+              <X size={18} />
+            </button>
+
+            <div className="rounded-2xl overflow-hidden border border-white/10 shadow-2xl bg-[#141414]">
+              <img
+                src={previewImage.url}
+                alt={previewImage.name}
+                className="max-w-[92vw] max-h-[82vh] object-contain bg-[#111]"
+                draggable={false}
+              />
+              <div className="px-4 py-3 text-xs text-gray-300 border-t border-white/5 bg-[#181818] truncate">
+                {previewImage.name}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
