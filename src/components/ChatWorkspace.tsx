@@ -23,6 +23,7 @@ export default function ChatWorkspace({ state, actions, refs }: ChatWorkspacePro
     attachments,
     selectedModel,
     availableModels,
+    modelOptions,
     showModelDropdown,
     webSearchMode,
     showRoleDropdown,
@@ -162,6 +163,7 @@ export default function ChatWorkspace({ state, actions, refs }: ChatWorkspacePro
         selectedModel={selectedModel}
         setSelectedModel={setSelectedModel}
         availableModels={availableModels}
+        modelOptions={modelOptions}
         showModelDropdown={showModelDropdown}
         setShowModelDropdown={setShowModelDropdown}
         webSearchMode={webSearchMode}

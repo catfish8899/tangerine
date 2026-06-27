@@ -1,8 +1,8 @@
 import React from "react";
-import { 
-  Send, 
-  ChevronUp, 
-  Paperclip, 
+import {
+  Send,
+  ChevronUp,
+  Paperclip,
   X,
   FileCode,
   FileText,
@@ -16,6 +16,14 @@ import {
 } from "lucide-react";
 import { AttachmentFile, Role } from "../types/chat";
 
+interface ModelOption {
+  model: string;
+  providerName: string;
+  category: "ollama" | "cloud";
+  baseUrl?: string;
+  envKeyName?: string;
+}
+
 interface ChatInputProps {
   inputText: string;
   setInputText: (text: string) => void;
@@ -23,6 +31,7 @@ interface ChatInputProps {
   attachments: AttachmentFile[];
   selectedModel: string;
   availableModels: string[];
+  modelOptions?: ModelOption[];
   showModelDropdown: boolean;
   setShowModelDropdown: (show: boolean) => void;
   setSelectedModel: (modelName: string) => void;
@@ -50,6 +59,7 @@ export default function ChatInput({
   attachments,
   selectedModel,
   availableModels,
+  modelOptions = [],
   showModelDropdown,
   setShowModelDropdown,
   setSelectedModel,
@@ -112,23 +122,29 @@ export default function ChatInput({
 
   const btnStyles = getSearchButtonStyles();
 
+  const getModelOption = (modelName: string): ModelOption | undefined => {
+    return modelOptions.find(item => item.model === modelName);
+  };
+
   const getModelLabel = (modelName: string): string => {
-    const lower = modelName.toLowerCase();
-    if (lower.includes("gemini")) {
-      return "Gemini 云端模型";
-    }
-    if (lower.includes("deepseek")) {
-      return "DeepSeek 云端模型";
-    }
-    return "Ollama 本地模型";
+    const option = getModelOption(modelName);
+    if (!option) return "云端模型";
+    return option.category === "ollama" ? "ollama模型" : "云端模型";
   };
 
   const getModelDotClass = (modelName: string) => {
-    const lower = modelName.toLowerCase();
-    if (lower.includes("gemini")) return "bg-blue-400 animate-pulse";
-    if (lower.includes("deepseek") && lower.includes("pro")) return "bg-amber-500 animate-pulse";
-    if (lower.includes("deepseek")) return "bg-[#f97316]";
-    return "bg-emerald-400 animate-pulse";
+    const option = getModelOption(modelName);
+    if (!option) return "bg-sky-400";
+
+    return option.category === "ollama"
+      ? "bg-emerald-400 animate-pulse"
+      : "bg-sky-400";
+  };
+
+  const getModelDisplayText = (modelName: string): string => {
+    const option = getModelOption(modelName);
+    if (!option) return modelName;
+    return `${option.providerName}/${option.model}`;
   };
 
   const getRoleButtonText = () => {
@@ -139,7 +155,7 @@ export default function ChatInput({
   return (
     <div className="p-5 md:p-6 bg-[#202020] border-t border-[#282828] shrink-0 relative">
       <div className="max-w-3xl mx-auto bg-[#2e2e2e] rounded-2xl border border-[#3e3e3e] shadow-[0_12px_40px_rgba(0,0,0,0.22)] flex flex-col px-3 pt-3 pb-2 focus-within:border-[#555] transition-all">
-        
+
         {/* 附件预览框卡片栏 */}
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 px-2 pb-2 border-b border-[#3e3e3e] mb-2 animate-in fade-in duration-100">
@@ -185,7 +201,7 @@ export default function ChatInput({
                     <Eye size={12} />
                   </button>
 
-                  <button 
+                  <button
                     type="button"
                     onClick={() => onRemoveAttachment(idx)}
                     className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/55 text-white hover:text-red-400 flex items-center justify-center transition-colors cursor-pointer"
@@ -201,7 +217,7 @@ export default function ChatInput({
                 >
                   {renderAttachmentIcon(file.type)}
                   <span className="max-w-[120px] truncate">{file.name}</span>
-                  <button 
+                  <button
                     type="button"
                     onClick={() => onRemoveAttachment(idx)}
                     className="ml-1 p-0.5 text-gray-500 hover:text-red-400 rounded-full transition-colors cursor-pointer"
@@ -231,7 +247,7 @@ export default function ChatInput({
 
         <div className="flex items-center justify-between border-t border-[#3a3a3a] pt-2 mt-2 gap-3">
           <div className="flex items-center gap-2 relative">
-            <button 
+            <button
               type="button"
               onClick={onSelectFiles}
               disabled={isLoading}
@@ -354,45 +370,52 @@ export default function ChatInput({
 
           <div className="flex items-center gap-2 relative">
             <div className="relative">
-              <button 
+              <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   setShowModelDropdown(!showModelDropdown);
                   setShowRoleDropdown(false);
                 }}
-                className="text-[10px] text-gray-400 hover:text-white font-semibold bg-[#202020] px-2.5 py-1.5 rounded-lg border border-[#353535] flex items-center gap-1.5 transition-colors cursor-pointer max-w-[190px]"
+                className="text-[10px] text-gray-400 hover:text-white font-semibold bg-[#202020] px-2.5 py-1.5 rounded-lg border border-[#353535] flex items-center gap-1.5 transition-colors cursor-pointer max-w-[230px]"
+                title={getModelDisplayText(selectedModel)}
               >
                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${getModelDotClass(selectedModel)}`}></span>
-                <span className="truncate">{selectedModel}</span>
+                <span className="truncate">{getModelDisplayText(selectedModel)}</span>
                 <ChevronUp size={10} className={`transform transition-transform shrink-0 ${showModelDropdown ? 'rotate-180' : ''}`} />
               </button>
 
               {showModelDropdown && (
-                <div className="absolute bottom-full right-0 mb-2 w-56 max-h-64 overflow-y-auto scrollbar-thin bg-[#252526] border border-[#3e3e3e] rounded-xl shadow-2xl py-1 z-50">
-                  {availableModels.map((modelName) => (
-                    <button
-                      type="button"
-                      key={modelName}
-                      onClick={() => {
-                        setSelectedModel(modelName);
-                        setShowModelDropdown(false);
-                      }}
-                      className={`w-full text-left px-3 py-2 text-xs hover:bg-[#333] transition-colors flex flex-col cursor-pointer ${
-                        selectedModel === modelName ? "text-amber-400 font-semibold" : "text-gray-300"
-                      }`}
-                    >
-                      <span className="truncate">{modelName}</span>
-                      <span className="text-[9px] text-gray-500 font-normal">
-                        {getModelLabel(modelName)}
-                      </span>
-                    </button>
-                  ))}
+                <div className="absolute bottom-full right-0 mb-2 w-72 max-h-64 overflow-y-auto scrollbar-thin bg-[#252526] border border-[#3e3e3e] rounded-xl shadow-2xl py-1 z-50">
+                  {availableModels.map((modelName) => {
+                    const option = getModelOption(modelName);
+                    const displayText = getModelDisplayText(modelName);
+
+                    return (
+                      <button
+                        type="button"
+                        key={modelName}
+                        onClick={() => {
+                          setSelectedModel(modelName);
+                          setShowModelDropdown(false);
+                        }}
+                        className={`w-full text-left px-3 py-2 text-xs hover:bg-[#333] transition-colors flex flex-col cursor-pointer ${
+                          selectedModel === modelName ? "text-amber-400 font-semibold" : "text-gray-300"
+                        }`}
+                        title={displayText}
+                      >
+                        <span className="truncate">{displayText}</span>
+                        <span className="text-[9px] text-gray-500 font-normal">
+                          {getModelLabel(modelName)}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
 
-            <button 
+            <button
               type="button"
               onClick={onSendMessage}
               disabled={(!inputText.trim() && attachments.length === 0) || isLoading}

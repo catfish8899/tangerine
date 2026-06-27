@@ -8,7 +8,7 @@ export interface Message {
   tokensUsed?: number;
   timestamp?: number;
   filePaths?: string[]; // 记录本次消息关联的文件绝对路径列表
-  
+
   // 👇 编辑和分支管理字段
   isEditing?: boolean;
   activeBranchIndex?: number;
@@ -30,7 +30,7 @@ export interface Role {
   id: string;
   name: string;
   systemPrompt: string;
-  provider?: string; // 角色绑定的模型提供商
+  provider?: string; // 角色绑定的模型提供商（展示名，可与设置页提供商名称保持一致）
   model?: string;    // 角色绑定的模型名称
 }
 

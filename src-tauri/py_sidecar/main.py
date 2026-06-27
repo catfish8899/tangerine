@@ -28,19 +28,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 获取环境变量里的 API Key
-api_key = os.environ.get('DEEPSEEK_API_KEY')
-gemini_api_key = os.environ.get('GEMINI_API_KEY')
 tavily_api_key = os.environ.get('TAVILY_API_KEY')
 OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 DEBUGGER_URL = "http://127.0.0.1:9999/log"
 
+
 class ChatRequest(BaseModel):
-    model: str  # 模型名称，例如 deepseek-v4-flash, gemini-3.5-flash, qwen2:7b 等
+    model: str  # 模型名称，例如 deepseek-v4-flash, gemini-2.5-flash, qwen2:7b 等
     messages: list
     file_paths: Optional[List[str]] = []  # 接收绑定的本地绝对路径列表
     web_search: Optional[str] = "off"     # 支持三态值: "off" | "direct" | "agent"
-    provider: Optional[str] = None        # 前端透传的提供商，如 "deepseek", "gemini", "ollama"
+    provider: Optional[str] = None        # 前端透传的提供商显示名
+    base_url: Optional[str] = None        # 前端透传的 Base URL
+    env_key_name: Optional[str] = None    # 前端透传的环境变量名
+
 
 # ================= 开发者助手非阻塞广播函数 =================
 
@@ -57,6 +58,7 @@ async def send_debug_log(log_type: str, extra_data: dict):
     except Exception:
         pass
 
+
 # ================= 辅助函数：根据路径转换/解析多模态与Office、代码文件 =================
 
 def process_file_paths(file_paths: List[str]) -> tuple:
@@ -68,58 +70,59 @@ def process_file_paths(file_paths: List[str]) -> tuple:
     llama_cloud_key = os.environ.get("LLAMA_CLOUD_API_KEY") or os.environ.get("LLAMAPARSE_API_KEY")
 
     for path in file_paths:
-        if not os.path.exists(path):
-            continue
+      if not os.path.exists(path):
+          continue
 
-        filename = os.path.basename(path)
-        ext = os.path.splitext(path)[1].lower()
+      filename = os.path.basename(path)
+      ext = os.path.splitext(path)[1].lower()
 
-        if ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.mp3', '.wav', '.ogg', '.m4a']:
-            try:
-                mime_type, _ = mimetypes.guess_type(path)
-                if not mime_type:
-                    mime_type = "image/png" if ext in ['.png', '.jpg', '.jpeg'] else "audio/mp3"
-                
-                with open(path, "rb") as f:
-                    file_b64 = base64.b64encode(f.read()).decode("utf-8")
-                
-                if ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']:
-                    multimodal_contents.append({
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:{mime_type};base64,{file_b64}"
-                        }
-                    })
-                else:
-                    multimodal_contents.append({
-                        "type": "input_audio",
-                        "input_audio": {
-                            "data": file_b64,
-                            "format": ext.replace('.', '')
-                        }
-                    })
-            except Exception as e:
-                text_context += f"\n\n[读取多模态文件出错 {filename}: {str(e)}]\n\n"
-        else:
-            try:
-                if ext in ['.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', '.pdf'] and llama_cloud_key:
-                    try:
-                        from llama_parse import LlamaParse
-                        parser = LlamaParse(api_key=llama_cloud_key, result_type="markdown")
-                        extra_docs = parser.load_data(path)
-                        parsed_text = "\n".join([doc.text for doc in extra_docs])
-                        text_context += f"\n\n--- [解析文档: {filename}] ---\n{parsed_text}\n"
-                    except Exception as parse_err:
-                        text_context += f"\n\n[LlamaParse 解析文档失败 {filename}: {str(parse_err)}，尝试普通文本读取]\n\n"
-                        with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                            text_context += f"\n\n--- [解析文本: {filename}] ---\n{f.read(50000)}\n"
-                else:
-                    with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                        text_context += f"\n\n--- [解析代码/文本: {filename}] ---\n{f.read(50000)}\n"
-            except Exception as e:
-                text_context += f"\n\n[读取文本文件出错 {filename}: {str(e)}]\n\n"
+      if ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.mp3', '.wav', '.ogg', '.m4a']:
+          try:
+              mime_type, _ = mimetypes.guess_type(path)
+              if not mime_type:
+                  mime_type = "image/png" if ext in ['.png', '.jpg', '.jpeg'] else "audio/mp3"
+
+              with open(path, "rb") as f:
+                  file_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+              if ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']:
+                  multimodal_contents.append({
+                      "type": "image_url",
+                      "image_url": {
+                          "url": f"data:{mime_type};base64,{file_b64}"
+                      }
+                  })
+              else:
+                  multimodal_contents.append({
+                      "type": "input_audio",
+                      "input_audio": {
+                          "data": file_b64,
+                          "format": ext.replace('.', '')
+                      }
+                  })
+          except Exception as e:
+              text_context += f"\n\n[读取多模态文件出错 {filename}: {str(e)}]\n\n"
+      else:
+          try:
+              if ext in ['.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', '.pdf'] and llama_cloud_key:
+                  try:
+                      from llama_parse import LlamaParse
+                      parser = LlamaParse(api_key=llama_cloud_key, result_type="markdown")
+                      extra_docs = parser.load_data(path)
+                      parsed_text = "\n".join([doc.text for doc in extra_docs])
+                      text_context += f"\n\n--- [解析文档: {filename}] ---\n{parsed_text}\n"
+                  except Exception as parse_err:
+                      text_context += f"\n\n[LlamaParse 解析文档失败 {filename}: {str(parse_err)}，尝试普通文本读取]\n\n"
+                      with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                          text_context += f"\n\n--- [解析文本: {filename}] ---\n{f.read(50000)}\n"
+              else:
+                  with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                      text_context += f"\n\n--- [解析代码/文本: {filename}] ---\n{f.read(50000)}\n"
+          except Exception as e:
+              text_context += f"\n\n[读取文本文件出错 {filename}: {str(e)}]\n\n"
 
     return text_context, multimodal_contents
+
 
 @app.post("/select_files")
 async def select_files():
@@ -154,6 +157,7 @@ async def select_files():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"打开文件选择框失败: {str(e)}")
 
+
 @app.get("/api/ollama/status")
 async def get_ollama_status():
     """检测本地 Ollama 服务是否在线"""
@@ -165,6 +169,7 @@ async def get_ollama_status():
             return {"status": "offline", "message": f"状态异常: HTTP {res.status_code}"}
     except Exception as e:
         return {"status": "offline", "message": str(e)}
+
 
 @app.get("/api/ollama/tags")
 async def get_ollama_tags():
@@ -180,23 +185,112 @@ async def get_ollama_tags():
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+
+# ================= 提供商判断与请求辅助函数 =================
+
+def normalize_text(value: Optional[str]) -> str:
+    return (value or "").strip()
+
+def normalize_lower(value: Optional[str]) -> str:
+    return normalize_text(value).lower()
+
+def is_ollama_provider(provider: Optional[str], base_url: Optional[str]) -> bool:
+    p = normalize_lower(provider)
+    b = normalize_lower(base_url)
+
+    if p == "ollama":
+        return True
+
+    if "127.0.0.1:11434" in b or "localhost:11434" in b:
+        return True
+
+    return False
+
+def is_gemini_provider(provider: Optional[str], model: str, base_url: Optional[str]) -> bool:
+    p = normalize_lower(provider)
+    b = normalize_lower(base_url)
+    m = normalize_lower(model)
+
+    # Gemini 不是标准 OpenAI 兼容，因此保留专用分支
+    if p == "gemini":
+        return True
+
+    if "generativelanguage.googleapis.com" in b:
+        return True
+
+    if m.startswith("gemini"):
+        return True
+
+    return False
+
+def resolve_openai_like_base_url(base_url: Optional[str]) -> Optional[str]:
+    val = normalize_text(base_url)
+    if not val:
+        return None
+    return val.rstrip("/")
+
+def get_api_key_from_env(env_key_name: Optional[str]) -> Optional[str]:
+    env_name = normalize_text(env_key_name)
+    if not env_name:
+        return None
+    return os.environ.get(env_name)
+
+def sanitize_messages_for_text_only(messages: list) -> list:
+    """
+    某些 OpenAI 兼容后端 / 本地 Ollama 不一定支持 input_audio / image_url 混合结构，
+    因此在必要时将内容折叠为纯文本。
+    """
+    formatted_messages = []
+    for msg in messages:
+        if isinstance(msg.get("content"), list):
+            text_only = ""
+            for item in msg["content"]:
+                if item.get("type") == "text":
+                    text_only += item.get("text", "")
+            formatted_messages.append({"role": msg["role"], "content": text_only})
+        else:
+            formatted_messages.append({"role": msg["role"], "content": msg["content"]})
+    return formatted_messages
+
+
 # ================= 🚀 流式核心生成器与 LLM 客户端 =================
 
-async def call_llm_api_stream(model: str, messages: list, provider: str, search_sources: list):
+async def call_llm_api_stream(
+    model: str,
+    messages: list,
+    provider: str,
+    search_sources: list,
+    base_url: Optional[str] = None,
+    env_key_name: Optional[str] = None
+):
     """
     支持流式传输的通用 LLM 接口，逐步 yield SSE chunk 给前端
+
+    路由策略：
+    1. Gemini：专用 SDK；
+    2. Ollama：本地 OpenAI 兼容通路；
+    3. 其余云端第三方：统一走 OpenAI 兼容通路（支持 CherryIn / OpenRouter / 各类网关）。
     """
-    await send_debug_log("LLM_CALL_PREPARED", {"messages": messages})
+    await send_debug_log("LLM_CALL_PREPARED", {
+        "provider": provider,
+        "model": model,
+        "base_url": base_url,
+        "env_key_name": env_key_name,
+        "messages": messages
+    })
+
     full_content = ""
     usage_dict = {"total_tokens": 0, "prompt_tokens": 0, "completion_tokens": 0}
 
     # ---- Gemini 流式逻辑 ----
-    if provider == "gemini" or "gemini" in model.lower():
-        api_key_val = os.environ.get('GEMINI_API_KEY')
+    if is_gemini_provider(provider, model, base_url):
+        api_key_val = get_api_key_from_env(env_key_name) or os.environ.get('GEMINI_API_KEY')
         if not api_key_val:
-            error_data = json.dumps({"error": "本地未检测到环境变量 GEMINI_API_KEY，请检查系统设置！"})
+            env_name = normalize_text(env_key_name) or "GEMINI_API_KEY"
+            error_data = json.dumps({"error": f"本地未检测到环境变量 {env_name}，请检查系统设置！"})
             yield f"data: {error_data}\n\n"
             return
+
         try:
             client = genai.Client(api_key=api_key_val)
             contents = []
@@ -208,8 +302,10 @@ async def call_llm_api_stream(model: str, messages: list, provider: str, search_
             for msg in messages:
                 if msg["role"] == "system":
                     continue
+
                 role_val = "user" if msg["role"] == "user" else "model"
                 parts_list = []
+
                 if isinstance(msg["content"], list):
                     for part in msg["content"]:
                         if part.get("type") == "text":
@@ -225,10 +321,11 @@ async def call_llm_api_stream(model: str, messages: list, provider: str, search_
                                 ))
                 else:
                     parts_list.append(types.Part.from_text(text=msg["content"]))
+
                 contents.append(types.Content(role=role_val, parts=parts_list))
 
             config = types.GenerateContentConfig(system_instruction=system_instruction) if system_instruction else None
-            
+
             response_stream = client.models.generate_content_stream(
                 model=model,
                 contents=contents,
@@ -238,14 +335,14 @@ async def call_llm_api_stream(model: str, messages: list, provider: str, search_
             for chunk in response_stream:
                 text_chunk = chunk.text or ""
                 full_content += text_chunk
-                
+
                 if chunk.usage_metadata:
                     usage_dict = {
                         "total_tokens": chunk.usage_metadata.total_token_count,
                         "prompt_tokens": chunk.usage_metadata.prompt_token_count,
                         "completion_tokens": chunk.usage_metadata.candidates_token_count
                     }
-                
+
                 payload = {
                     "choices": [{"delta": {"content": text_chunk}}],
                     "usage": usage_dict,
@@ -255,79 +352,23 @@ async def call_llm_api_stream(model: str, messages: list, provider: str, search_
                 await asyncio.sleep(0.005)
 
             await send_debug_log("LLM_RESPONSE_RECEIVED", {
-                "content": full_content,
-                "usage": usage_dict
-            })
-
-        except Exception as e:
-            error_data = json.dumps({"error": f"Gemini 云端推理流式失败: {str(e)}"})
-            yield f"data: {error_data}\n\n"
-
-    # ---- DeepSeek 流式逻辑 ----
-    elif provider == "deepseek" or "deepseek" in model.lower():
-        api_key_val = os.environ.get('DEEPSEEK_API_KEY')
-        if not api_key_val:
-            error_data = json.dumps({"error": "本地未检测到环境变量 DEEPSEEK_API_KEY，请检查系统设置！"})
-            yield f"data: {error_data}\n\n"
-            return
-        try:
-            client = OpenAI(api_key=api_key_val, base_url="https://api.deepseek.com")
-            kwargs = {
+                "provider": provider,
                 "model": model,
-                "messages": messages,
-                "stream": True
-            }
-            if model == "deepseek-v4-pro":
-                kwargs["reasoning_effort"] = "high"
-                kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
-
-            response = client.chat.completions.create(**kwargs)
-            for chunk in response:
-                if not chunk.choices:
-                    continue
-                delta = chunk.choices[0].delta
-                text_chunk = getattr(delta, "content", "") or ""
-                reasoning_chunk = getattr(delta, "reasoning_content", None)
-                
-                full_content += text_chunk
-                
-                usage_info = getattr(chunk, "usage", None)
-                if usage_info:
-                    usage_dict = usage_info.model_dump() if hasattr(usage_info, "model_dump") else dict(usage_info)
-
-                payload = {
-                    "choices": [{"delta": {"content": text_chunk, "reasoning_content": reasoning_chunk}}],
-                    "usage": usage_dict,
-                    "sources": search_sources
-                }
-                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-                await asyncio.sleep(0.002)
-
-            await send_debug_log("LLM_RESPONSE_RECEIVED", {
                 "content": full_content,
                 "usage": usage_dict
             })
+
         except Exception as e:
-            error_data = json.dumps({"error": f"DeepSeek 云端推理流式失败: {str(e)}"})
+            error_data = json.dumps({"error": f"{provider or 'Gemini'} 云端推理流式失败: {str(e)}"})
             yield f"data: {error_data}\n\n"
 
-    # ---- Ollama 本地流式逻辑 (使用标准 OpenAI 兼容 SDK 保证 100% 连通与鲁棒性) ----
-    else:
+    # ---- Ollama 本地流式逻辑 ----
+    elif is_ollama_provider(provider, base_url):
         try:
-            # 🛡️ 鲁棒设计：直接使用标准的 OpenAI SDK 访问本地 Ollama 端口，避免 httpx 处理底层缓冲分包报错
-            client = OpenAI(api_key="ollama", base_url=f"{OLLAMA_BASE_URL}/v1")
-            
-            # 清理多模态 payload 避免本地不支持导致崩溃
-            formatted_messages = []
-            for msg in messages:
-                if isinstance(msg.get("content"), list):
-                    text_only = ""
-                    for item in msg["content"]:
-                        if item.get("type") == "text":
-                            text_only += item.get("text", "")
-                    formatted_messages.append({"role": msg["role"], "content": text_only})
-                else:
-                    formatted_messages.append({"role": msg["role"], "content": msg["content"]})
+            ollama_base = resolve_openai_like_base_url(base_url) or f"{OLLAMA_BASE_URL}"
+            client = OpenAI(api_key="ollama", base_url=f"{ollama_base}/v1")
+
+            formatted_messages = sanitize_messages_for_text_only(messages)
 
             response = client.chat.completions.create(
                 model=model,
@@ -342,7 +383,6 @@ async def call_llm_api_stream(model: str, messages: list, provider: str, search_
                 text_chunk = getattr(delta, "content", "") or ""
                 full_content += text_chunk
 
-                # 提取本地模型的消耗数据
                 usage_info = getattr(chunk, "usage", None)
                 if usage_info:
                     usage_dict = usage_info.model_dump() if hasattr(usage_info, "model_dump") else dict(usage_info)
@@ -356,11 +396,79 @@ async def call_llm_api_stream(model: str, messages: list, provider: str, search_
                 await asyncio.sleep(0.002)
 
             await send_debug_log("LLM_RESPONSE_RECEIVED", {
+                "provider": provider,
+                "model": model,
                 "content": full_content,
                 "usage": usage_dict
             })
         except Exception as e:
-            error_data = json.dumps({"error": f"Ollama 本地连接或模型加载失败: {str(e)}。请确保本地已运行 `ollama run {model}` 启动。"})
+            error_data = json.dumps({"error": f"{provider or 'Ollama'} 本地连接或模型加载失败: {str(e)}。请确保本地已运行 `ollama run {model}` 启动。"})
+            yield f"data: {error_data}\n\n"
+
+    # ---- 通用 OpenAI 兼容第三方 API 流式逻辑 ----
+    else:
+        api_key_val = get_api_key_from_env(env_key_name)
+        if not api_key_val:
+            env_name = normalize_text(env_key_name) or "未提供环境变量名"
+            error_data = json.dumps({"error": f"本地未检测到环境变量 {env_name}，请检查系统设置！"})
+            yield f"data: {error_data}\n\n"
+            return
+
+        final_base_url = resolve_openai_like_base_url(base_url)
+        if not final_base_url:
+            error_data = json.dumps({"error": "当前第三方提供商未配置有效 Base URL，请在设置页补充。"})
+            yield f"data: {error_data}\n\n"
+            return
+
+        try:
+            client = OpenAI(api_key=api_key_val, base_url=final_base_url)
+
+            # 对通用第三方先保守走原始 messages。
+            # 若后续你发现某些网关不支持多模态结构，可再降级到 sanitize_messages_for_text_only。
+            kwargs: Dict[str, Any] = {
+                "model": model,
+                "messages": messages,
+                "stream": True
+            }
+
+            # 保留对 DeepSeek 旧模型的能力增强，但不再依赖 provider 名称硬编码
+            if model == "deepseek-v4-pro":
+                kwargs["reasoning_effort"] = "high"
+                kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
+
+            response = client.chat.completions.create(**kwargs)
+
+            for chunk in response:
+                if not chunk.choices:
+                    continue
+
+                delta = chunk.choices[0].delta
+                text_chunk = getattr(delta, "content", "") or ""
+                reasoning_chunk = getattr(delta, "reasoning_content", None)
+
+                full_content += text_chunk
+
+                usage_info = getattr(chunk, "usage", None)
+                if usage_info:
+                    usage_dict = usage_info.model_dump() if hasattr(usage_info, "model_dump") else dict(usage_info)
+
+                payload = {
+                    "choices": [{"delta": {"content": text_chunk, "reasoning_content": reasoning_chunk}}],
+                    "usage": usage_dict,
+                    "sources": search_sources
+                }
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0.002)
+
+            await send_debug_log("LLM_RESPONSE_RECEIVED", {
+                "provider": provider,
+                "model": model,
+                "base_url": final_base_url,
+                "content": full_content,
+                "usage": usage_dict
+            })
+        except Exception as e:
+            error_data = json.dumps({"error": f"{provider or '第三方 OpenAI 兼容接口'} 推理流式失败: {str(e)}"})
             yield f"data: {error_data}\n\n"
 
 
@@ -368,31 +476,38 @@ async def call_llm_api_stream(model: str, messages: list, provider: str, search_
 
 @app.post("/chat")
 async def chat(request: ChatRequest):
-    # 广播 incoming 请求给 debugger.py 
+    # 广播 incoming 请求给 debugger.py
     await send_debug_log("REQUEST_INCOMING", {
+        "provider": request.provider,
         "model": request.model,
+        "base_url": request.base_url,
+        "env_key_name": request.env_key_name,
         "file_paths": request.file_paths,
         "web_search": request.web_search
     })
 
-    provider = request.provider or ""
+    provider = normalize_text(request.provider)
+    base_url = normalize_text(request.base_url)
+    env_key_name = normalize_text(request.env_key_name)
+
+    # 仅作为兼容兜底，不再作为主逻辑依赖
     if not provider:
-        if "deepseek" in request.model.lower():
-            provider = "deepseek"
-        elif "gemini" in request.model.lower():
-            provider = "gemini"
+        if is_gemini_provider(provider, request.model, base_url):
+            provider = "Gemini"
+        elif is_ollama_provider(provider, base_url):
+            provider = "Ollama"
         else:
-            provider = "ollama"
+            provider = "OpenAI-Compatible"
 
     text_context, multimodal_contents = process_file_paths(request.file_paths)
     processed_messages = []
-    
+
     for i, msg in enumerate(request.messages):
         if i == len(request.messages) - 1 and msg["role"] == "user":
             user_text = msg["content"]
             if text_context:
                 user_text = f"{text_context}\n\n请结合以上文档/代码内容，回答用户的问题：{user_text}"
-            
+
             if multimodal_contents:
                 content_payload = [{"type": "text", "text": user_text}] + multimodal_contents
                 processed_messages.append({
@@ -408,7 +523,7 @@ async def chat(request: ChatRequest):
             processed_messages.append(msg)
 
     search_sources = []
-    
+
     # 🚀 --- 联网搜索处理核心路由 ---
     if request.web_search != "off":
         if not tavily_api_key:
@@ -430,7 +545,7 @@ async def chat(request: ChatRequest):
                     await send_debug_log("TAVILY_CALL_TRIGGERED", {"query": last_msg_content})
                     response = tavily_client.search(query=last_msg_content, max_results=5)
                     results = response.get("results", [])
-                    
+
                     if results:
                         round_content = "--- [网络检索数据] ---\n"
                         for idx, item in enumerate(results):
@@ -439,7 +554,7 @@ async def chat(request: ChatRequest):
                             snippet = item.get("content", "")
                             search_sources.append({"title": title, "url": url})
                             round_content += f"[{idx+1}] 标题: {title}\n链接: {url}\n摘要: {snippet}\n\n"
-                        
+
                         await send_debug_log("TAVILY_CALL_COMPLETED", {
                             "round": 1,
                             "query": last_msg_content,
@@ -452,7 +567,7 @@ async def chat(request: ChatRequest):
                             f"{round_content}\n"
                             f"====================================\n"
                         )
-                        
+
                         if isinstance(processed_messages[-1]["content"], list):
                             processed_messages[-1]["content"].insert(0, {"type": "text", "text": search_prompt})
                         else:
@@ -481,12 +596,25 @@ async def chat(request: ChatRequest):
                         agent_context.insert(0, {"role": "system", "content": agent_system_instruction})
 
                     max_agent_rounds = 3
-                    
-                    async def call_llm_api_sync(m_model, m_msgs, m_provider):
-                        await send_debug_log("LLM_CALL_PREPARED", {"messages": m_msgs})
+
+                    async def call_llm_api_sync(m_model, m_msgs, m_provider, m_base_url, m_env_key_name):
+                        await send_debug_log("LLM_CALL_PREPARED", {
+                            "provider": m_provider,
+                            "model": m_model,
+                            "base_url": m_base_url,
+                            "env_key_name": m_env_key_name,
+                            "messages": m_msgs
+                        })
                         full_txt = ""
                         final_usage = {}
-                        async for chunk_str in call_llm_api_stream(m_model, m_msgs, m_provider, []):
+                        async for chunk_str in call_llm_api_stream(
+                            m_model,
+                            m_msgs,
+                            m_provider,
+                            [],
+                            m_base_url,
+                            m_env_key_name
+                        ):
                             if chunk_str.startswith("data: "):
                                 try:
                                     js = json.loads(chunk_str[6:])
@@ -499,7 +627,13 @@ async def chat(request: ChatRequest):
                         return full_txt, final_usage
 
                     for agent_round in range(1, max_agent_rounds + 1):
-                        ai_choice, current_usage = await call_llm_api_sync(request.model, agent_context, provider)
+                        ai_choice, current_usage = await call_llm_api_sync(
+                            request.model,
+                            agent_context,
+                            provider,
+                            base_url,
+                            env_key_name
+                        )
                         match = re.search(r"\[SEARCH:\s*(.*?)\]", ai_choice)
                         if match:
                             query_to_search = match.group(1).strip()
@@ -543,9 +677,19 @@ async def chat(request: ChatRequest):
                                     yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
                                     await asyncio.sleep(0.01)
                             return StreamingResponse(stream_saved_response(), media_type="text/event-stream")
-                    
+
                     agent_context.append({"role": "user", "content": "您已达到检索上限，请直接基于已有事实，为用户输出最终的 Markdown 格式解答。"})
-                    return StreamingResponse(call_llm_api_stream(request.model, agent_context, provider, search_sources), media_type="text/event-stream")
+                    return StreamingResponse(
+                        call_llm_api_stream(
+                            request.model,
+                            agent_context,
+                            provider,
+                            search_sources,
+                            base_url,
+                            env_key_name
+                        ),
+                        media_type="text/event-stream"
+                    )
 
             except Exception as e:
                 error_warning = f"\n\n[联网检索服务异常，已为您回退到无网解答模式: {str(e)}]\n\n"
@@ -556,10 +700,21 @@ async def chat(request: ChatRequest):
 
     # ================= 走通用流式返回 =================
     try:
-        return StreamingResponse(call_llm_api_stream(request.model, processed_messages, provider, search_sources), media_type="text/event-stream")
+        return StreamingResponse(
+            call_llm_api_stream(
+                request.model,
+                processed_messages,
+                provider,
+                search_sources,
+                base_url,
+                env_key_name
+            ),
+            media_type="text/event-stream"
+        )
     except Exception as e:
         await send_debug_log("ERROR_OCCURRED", {"detail": str(e)})
         raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=5678)

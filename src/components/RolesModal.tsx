@@ -65,7 +65,8 @@ export default function RolesModal({ isOpen, onClose }: RolesModalProps) {
     const savedConfigs = localStorage.getItem(SETTINGS_STORAGE_KEY);
     if (savedConfigs) {
       try {
-        setProviderConfigs(JSON.parse(savedConfigs));
+        const parsedConfigs = JSON.parse(savedConfigs);
+        setProviderConfigs(Array.isArray(parsedConfigs) ? parsedConfigs : []);
       } catch (e) {
         console.error("加载模型配置失败:", e);
         setProviderConfigs([]);
@@ -79,7 +80,9 @@ export default function RolesModal({ isOpen, onClose }: RolesModalProps) {
   }, [isOpen]);
 
   const availableProviders = useMemo(() => {
-    return providerConfigs.map(cfg => cfg.providerName).filter(Boolean);
+    return providerConfigs
+      .map(cfg => cfg.providerName?.trim())
+      .filter((name): name is string => !!name);
   }, [providerConfigs]);
 
   const availableModelsForSelectedProvider = useMemo(() => {
@@ -89,6 +92,30 @@ export default function RolesModal({ isOpen, onClose }: RolesModalProps) {
     );
     return matched?.models || [];
   }, [providerConfigs, editRole?.provider]);
+
+  const persistedSelectedRole = useMemo(() => {
+    if (!selectedRoleId) return null;
+    return roles.find(role => role.id === selectedRoleId) || null;
+  }, [roles, selectedRoleId]);
+
+  // 判断当前编辑内容是否已发生未保存修改
+  const hasUnsavedChanges = useMemo(() => {
+    if (!editRole || !persistedSelectedRole) return false;
+
+    return (
+      (editRole.name ?? '') !== (persistedSelectedRole.name ?? '') ||
+      (editRole.systemPrompt ?? '') !== (persistedSelectedRole.systemPrompt ?? '') ||
+      (editRole.provider ?? '') !== (persistedSelectedRole.provider ?? '') ||
+      (editRole.model ?? '') !== (persistedSelectedRole.model ?? '')
+    );
+  }, [editRole, persistedSelectedRole]);
+
+  // 一旦继续编辑，立即取消“已保存”视觉状态
+  useEffect(() => {
+    if (hasUnsavedChanges && savedMsg) {
+      setSavedMsg('');
+    }
+  }, [hasUnsavedChanges, savedMsg]);
 
   if (!isOpen) return null;
 
@@ -109,6 +136,7 @@ export default function RolesModal({ isOpen, onClose }: RolesModalProps) {
     const baseName = "自定义角色";
     let candidateName = baseName;
     let index = 1;
+
     while (roles.some(r => r.name.toLowerCase() === candidateName.toLowerCase())) {
       candidateName = `${baseName} ${index}`;
       index++;
@@ -162,7 +190,9 @@ export default function RolesModal({ isOpen, onClose }: RolesModalProps) {
     const nextRole: Role = {
       ...editRole,
       name: trimmedName,
-      systemPrompt: editRole.systemPrompt.trim()
+      systemPrompt: editRole.systemPrompt.trim(),
+      provider: editRole.provider || undefined,
+      model: editRole.model || undefined
     };
 
     const updated = roles.map(r => r.id === nextRole.id ? nextRole : r);
@@ -187,13 +217,18 @@ export default function RolesModal({ isOpen, onClose }: RolesModalProps) {
   };
 
   const handleModelChange = (modelName: string) => {
-    setEditRole(prev => prev ? { ...prev, model: modelName || undefined } : prev);
+    setEditRole(prev => prev ? {
+      ...prev,
+      model: modelName || undefined
+    } : prev);
   };
+
+  const isSaveSuccess = !!savedMsg && !hasUnsavedChanges;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/60 backdrop-blur-md transition-all duration-300">
       <div className="relative w-full h-full max-w-7xl bg-[#171718]/95 border border-[#2d2d2d] rounded-2xl flex flex-col shadow-2xl overflow-hidden">
-        
+
         {/* 头部条 */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#2d2d2d] bg-[#121213]/90">
           <div className="flex items-center gap-3">
@@ -213,7 +248,7 @@ export default function RolesModal({ isOpen, onClose }: RolesModalProps) {
             </div>
           </div>
 
-          <button 
+          <button
             onClick={onClose}
             className="p-2 hover:bg-[#2a2a2a] rounded-lg text-gray-400 hover:text-white transition-colors cursor-pointer"
           >
@@ -312,17 +347,17 @@ export default function RolesModal({ isOpen, onClose }: RolesModalProps) {
                     {errorMsg && (
                       <span className="text-xs text-red-400 font-medium">{errorMsg}</span>
                     )}
-                    {savedMsg && (
-                      <span className="text-xs text-green-400 flex items-center gap-1">
-                        <Check size={12} /> {savedMsg}
-                      </span>
-                    )}
+
                     <button
                       onClick={handleSaveEdit}
-                      className="flex items-center gap-1.5 text-[12px] bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-lg font-semibold transition-colors cursor-pointer"
+                      className={`flex items-center px-3.5 py-2 rounded-md text-xs font-bold border transition-all cursor-pointer ${
+                        isSaveSuccess
+                          ? "bg-green-500/20 border-green-500/30 text-green-400"
+                          : "bg-[#253746] border-[#2d4558] text-[#4ea1db] hover:bg-[#2d4355]"
+                      } ${isSaveSuccess ? "gap-1.5" : ""}`}
                     >
-                      <Check size={13} />
-                      保存角色
+                      {isSaveSuccess && <Check size={12} />}
+                      <span>{isSaveSuccess ? "已保存" : "保存角色"}</span>
                     </button>
                   </div>
                 </div>
@@ -333,7 +368,10 @@ export default function RolesModal({ isOpen, onClose }: RolesModalProps) {
                     <input
                       type="text"
                       value={editRole.name}
-                      onChange={(e) => setEditRole(prev => prev ? { ...prev, name: e.target.value } : prev)}
+                      onChange={(e) => {
+                        setEditRole(prev => prev ? { ...prev, name: e.target.value } : prev);
+                        setErrorMsg('');
+                      }}
                       className="w-full mt-2 bg-[#121213] border border-[#303033] focus:border-amber-500 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none transition-colors"
                       placeholder="例如：美食大师"
                     />
@@ -344,7 +382,10 @@ export default function RolesModal({ isOpen, onClose }: RolesModalProps) {
                     <div className="relative mt-2">
                       <select
                         value={editRole.provider || ""}
-                        onChange={(e) => handleProviderChange(e.target.value)}
+                        onChange={(e) => {
+                          handleProviderChange(e.target.value);
+                          setErrorMsg('');
+                        }}
                         className="w-full appearance-none bg-[#121213] border border-[#303033] focus:border-amber-500 rounded-xl px-3 py-2.5 pr-10 text-sm text-white outline-none transition-colors cursor-pointer"
                       >
                         <option value="">不绑定</option>
@@ -365,7 +406,10 @@ export default function RolesModal({ isOpen, onClose }: RolesModalProps) {
                     <div className="relative mt-2">
                       <select
                         value={editRole.model || ""}
-                        onChange={(e) => handleModelChange(e.target.value)}
+                        onChange={(e) => {
+                          handleModelChange(e.target.value);
+                          setErrorMsg('');
+                        }}
                         disabled={!editRole.provider}
                         className="w-full appearance-none bg-[#121213] border border-[#303033] focus:border-amber-500 rounded-xl px-3 py-2.5 pr-10 text-sm text-white outline-none transition-colors cursor-pointer disabled:text-gray-600 disabled:cursor-not-allowed"
                       >
@@ -389,7 +433,10 @@ export default function RolesModal({ isOpen, onClose }: RolesModalProps) {
                   </label>
                   <textarea
                     value={editRole.systemPrompt}
-                    onChange={(e) => setEditRole(prev => prev ? { ...prev, systemPrompt: e.target.value } : prev)}
+                    onChange={(e) => {
+                      setEditRole(prev => prev ? { ...prev, systemPrompt: e.target.value } : prev);
+                      setErrorMsg('');
+                    }}
                     className="w-full mt-2 bg-[#121213] border border-[#303033] focus:border-amber-500 rounded-2xl px-4 py-3 text-sm text-gray-200 focus:outline-none resize-none min-h-[360px] leading-relaxed transition-colors"
                     placeholder="定义这个角色的人设、风格、行为边界、回答规则..."
                   />

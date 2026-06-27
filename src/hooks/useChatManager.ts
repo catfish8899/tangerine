@@ -12,6 +12,21 @@ const FONT_SIZE_STORAGE_KEY = "tangerine_font_size";
 const SETTINGS_STORAGE_KEY = "tangerine_api_settings";
 const ROLES_STORAGE_KEY = "tangerine_roles";
 
+interface ResolvedModelConfig {
+  provider: string;
+  model: string;
+  baseUrl?: string;
+  envKeyName?: string;
+}
+
+interface ModelOption {
+  model: string;
+  providerName: string;
+  category: "ollama" | "cloud";
+  baseUrl?: string;
+  envKeyName?: string;
+}
+
 export function useChatManager() {
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -32,8 +47,15 @@ export function useChatManager() {
   const [inputText, setInputText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string>("deepseek-v4-flash");
-  const [availableModels, setAvailableModels] = useState<string[]>(["deepseek-v4-flash", "deepseek-v4-pro"]);
+
+  // 默认模型不再固定绑定 deepseek，优先在同步配置时自动矫正
+  const [selectedModel, setSelectedModel] = useState<string>("");
+
+  // 兼容现有 ChatInput 逻辑，仍输出字符串数组
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  // 新增：给模型下拉展示 provider / category / baseUrl 等信息
+  const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
+
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showRoleDropdown, setShowRoleDropdown] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -149,56 +171,121 @@ export function useChatManager() {
     }
   }, [showRoles]);
 
-  const getProviderByModel = (model: string): string => {
-    const lowerModel = model.toLowerCase();
-    if (lowerModel.includes("gemini")) return "gemini";
-    if (lowerModel.includes("deepseek")) return "deepseek";
-    return "ollama";
-  };
-
-  const syncModelsFromSettings = () => {
+  const getSavedApiConfigs = (): ApiProviderConfig[] => {
     const savedConfigs = localStorage.getItem(SETTINGS_STORAGE_KEY);
-    if (savedConfigs) {
-      try {
-        const parsed: ApiProviderConfig[] = JSON.parse(savedConfigs);
-        const allModels = parsed.flatMap(cfg => cfg.models);
-        if (allModels.length > 0) {
-          setAvailableModels(allModels);
-          if (!allModels.includes(selectedModel)) {
-            setSelectedModel(allModels[0]);
-          }
-          return;
-        }
-      } catch (e) {
-        console.error("加载模型列表失败：", e);
-      }
+    if (!savedConfigs) return [];
+    try {
+      const parsed = JSON.parse(savedConfigs);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      console.error("读取 API 配置失败：", e);
+      return [];
     }
-    setAvailableModels(["deepseek-v4-flash", "deepseek-v4-pro"]);
   };
 
-  const getRoleResolvedModelInfo = (session?: ChatSession) => {
-    const fallbackModel = selectedModel;
-    const fallbackProvider = getProviderByModel(fallbackModel);
+  // 仅归类为 ollama模型 / 云端模型，不再做 deepseek / gemini / 其他 的硬编码归属
+  const getModelCategoryFromConfig = (config?: ApiProviderConfig): "ollama" | "cloud" => {
+    if (!config) return "cloud";
+    const providerLower = config.providerName.trim().toLowerCase();
+    const baseUrlLower = config.baseUrl.trim().toLowerCase();
 
-    if (!session?.roleId) {
-      return {
-        model: fallbackModel,
-        provider: fallbackProvider
-      };
+    if (
+      providerLower === "ollama" ||
+      baseUrlLower.includes("127.0.0.1:11434") ||
+      baseUrlLower.includes("localhost:11434")
+    ) {
+      return "ollama";
     }
 
-    const role = roles.find(r => r.id === session.roleId);
-    if (role?.model?.trim()) {
+    return "cloud";
+  };
+
+  const findConfigByModel = (model: string): ApiProviderConfig | undefined => {
+    const configs = getSavedApiConfigs();
+    return configs.find(cfg => Array.isArray(cfg.models) && cfg.models.includes(model));
+  };
+
+  const inferProviderNameByModelFallback = (model: string): string => {
+    const matchedConfig = findConfigByModel(model);
+    if (matchedConfig?.providerName?.trim()) return matchedConfig.providerName.trim();
+    return "未命名提供商";
+  };
+
+  const resolveModelConfig = (model: string, providerOverride?: string): ResolvedModelConfig => {
+    const matchedConfig = findConfigByModel(model);
+
+    if (matchedConfig) {
       return {
-        model: role.model.trim(),
-        provider: role.provider?.trim() || getProviderByModel(role.model.trim())
+        provider: providerOverride?.trim() || matchedConfig.providerName,
+        model,
+        baseUrl: matchedConfig.baseUrl,
+        envKeyName: matchedConfig.envKeyName
       };
     }
 
     return {
-      model: fallbackModel,
-      provider: fallbackProvider
+      provider: providerOverride?.trim() || inferProviderNameByModelFallback(model),
+      model,
+      baseUrl: undefined,
+      envKeyName: undefined
     };
+  };
+
+  const getModelOptionByName = (model: string): ModelOption | undefined => {
+    return modelOptions.find(item => item.model === model);
+  };
+
+  const syncModelsFromSettings = () => {
+    const parsed = getSavedApiConfigs();
+
+    const options: ModelOption[] = parsed.flatMap(cfg => {
+      const models = Array.isArray(cfg.models) ? cfg.models.filter(Boolean) : [];
+      const category = getModelCategoryFromConfig(cfg);
+
+      return models.map(model => ({
+        model,
+        providerName: cfg.providerName || "未命名提供商",
+        category,
+        baseUrl: cfg.baseUrl,
+        envKeyName: cfg.envKeyName
+      }));
+    });
+
+    const allModels = options.map(item => item.model);
+
+    if (allModels.length > 0) {
+      setModelOptions(options);
+      setAvailableModels(allModels);
+      setSelectedModel(prev => {
+        if (prev && allModels.includes(prev)) return prev;
+        return allModels[0];
+      });
+      return;
+    }
+
+    const fallbackModels = ["deepseek-v4-flash", "deepseek-v4-pro"];
+    setModelOptions(fallbackModels.map(model => ({
+      model,
+      providerName: "未命名提供商",
+      category: "cloud"
+    })));
+    setAvailableModels(fallbackModels);
+    setSelectedModel(prev => (prev && fallbackModels.includes(prev) ? prev : fallbackModels[0]));
+  };
+
+  const getRoleResolvedModelInfo = (session?: ChatSession): ResolvedModelConfig => {
+    const fallbackResolved = resolveModelConfig(selectedModel);
+
+    if (!session?.roleId) {
+      return fallbackResolved;
+    }
+
+    const role = roles.find(r => r.id === session.roleId);
+    if (role?.model?.trim()) {
+      return resolveModelConfig(role.model.trim(), role.provider?.trim());
+    }
+
+    return fallbackResolved;
   };
 
   // 通过 Rust 命令直接读取图片并返回 data URL
@@ -723,6 +810,8 @@ export function useChatManager() {
         body: JSON.stringify({
           model: resolvedModelInfo.model,
           provider: resolvedModelInfo.provider,
+          base_url: resolvedModelInfo.baseUrl,
+          env_key_name: resolvedModelInfo.envKeyName,
           messages: [{ role: "system", content: finalSystemPrompt }, ...apiMessages],
           file_paths: filePathsToSend,
           web_search: webSearchMode
@@ -745,6 +834,8 @@ export function useChatManager() {
       if (!reader) throw new Error("流式数据读取器初始化失败！");
 
       let streamDone = false;
+      let streamErrorMessage = "";
+
       while (!streamDone) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -765,7 +856,13 @@ export function useChatManager() {
 
           try {
             const parsedData = JSON.parse(rawData);
-            if (parsedData.error) throw new Error(parsedData.error);
+
+            // 修复：一旦后端通过 SSE 返回 error，不再只在局部 try 中吞掉，
+            // 而是记录错误并抛到外层 catch，确保 system_err 气泡能被渲染。
+            if (parsedData.error) {
+              streamErrorMessage = parsedData.error;
+              throw new Error(parsedData.error);
+            }
 
             const textDelta = extractTextDelta(parsedData);
             const sources = extractSources(parsedData);
@@ -813,7 +910,26 @@ export function useChatManager() {
               return { ...s, messages: updatedMessages };
             }));
           } catch (e: any) {
+            // 如果是模型/后端明确报错，立即中断并进入外层 catch
+            if (streamErrorMessage || String(e?.message || "").trim()) {
+              throw e;
+            }
             console.error("解析流式行失败:", e);
+          }
+        }
+      }
+
+      // 修复：如果服务端在最后一段 buffer 中返回错误但未被 lines 完整消费，也要补解析一次
+      if (buffer.trim().startsWith("data: ")) {
+        const rawData = buffer.trim().slice(6).trim();
+        if (rawData && rawData !== "[DONE]") {
+          try {
+            const parsedData = JSON.parse(rawData);
+            if (parsedData.error) {
+              throw new Error(parsedData.error);
+            }
+          } catch (e: any) {
+            throw e;
           }
         }
       }
@@ -860,6 +976,7 @@ export function useChatManager() {
       attachments,
       selectedModel,
       availableModels,
+      modelOptions,
       showModelDropdown,
       showRoleDropdown,
       showSettings,
@@ -905,7 +1022,8 @@ export function useChatManager() {
       handleSelectRole,
       handleSwitchBranch,
       handleResendMessage,
-      handleSendMessage
+      handleSendMessage,
+      getModelOptionByName
     }
   };
 }

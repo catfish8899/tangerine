@@ -1,7 +1,8 @@
-// src/components/MessageItem.tsx 的完整修改流式优化版 (终极修复幽灵文本框与模型参数显示 Bug)
+// src/components/MessageItem.tsx
+// 完整修改版：优化流式空消息判定、避免历史 AI 消息受全局 loading 干扰，并保留现有设计语言
 import React, { useState } from "react";
-import { 
-  ChevronLeft, 
+import {
+  ChevronLeft,
   ChevronRight,
   FileCode,
   FileText,
@@ -15,7 +16,6 @@ import {
   CheckCircle2,
   ExternalLink
 } from "lucide-react";
-// 👇 导入 Tauri 原生 shell 安全浏览器跳转能力
 import { open } from "@tauri-apps/plugin-shell";
 import { Message, getFileType, format12HourTime } from "../types/chat";
 import MarkdownMessage from "./MarkdownMessage";
@@ -27,7 +27,7 @@ interface MessageItemProps {
   onSaveEdit: (messageId: string, newText: string) => void;
   onCancelEdit: (messageId: string) => void;
   onSwitchBranch: (messageId: string, direction: "prev" | "next") => void;
-  isParentLoading?: boolean; // 新增：父组件是否正处于 loading 状态，用于控制流式展示的合理时序
+  isParentLoading?: boolean; // 父组件全局 loading，仅作为“当前可能仍在流式中”的辅助信号
 }
 
 export default function MessageItem({
@@ -39,25 +39,28 @@ export default function MessageItem({
   onSwitchBranch,
   isParentLoading = false
 }: MessageItemProps) {
-  const isUser = msg.sender === 'user';
+  const isUser = msg.sender === "user";
+  const isAi = msg.sender === "ai";
+  const isSystemError = msg.sender === "system_err";
+
   const hasBranches = msg.branches && msg.branches.length > 1;
   const activeIdx = msg.activeBranchIndex ?? 0;
   const branchesCount = msg.branches ? msg.branches.length : 0;
-  
+
   // 控制网络搜索引用源抽屉的展开与折叠状态
   const [isSourcesOpen, setIsSourcesOpen] = useState(false);
 
-  const renderAttachmentIcon = (type: 'image' | 'audio' | 'code' | 'office' | 'other') => {
-    switch(type) {
-      case 'image': return <FileImage size={14} className="text-emerald-400" />;
-      case 'audio': return <FileAudio size={14} className="text-purple-400" />;
-      case 'code': return <FileCode size={14} className="text-blue-400" />;
-      case 'office': return <FileSpreadsheet size={14} className="text-orange-400" />;
+  const renderAttachmentIcon = (type: "image" | "audio" | "code" | "office" | "other") => {
+    switch (type) {
+      case "image": return <FileImage size={14} className="text-emerald-400" />;
+      case "audio": return <FileAudio size={14} className="text-purple-400" />;
+      case "code": return <FileCode size={14} className="text-blue-400" />;
+      case "office": return <FileSpreadsheet size={14} className="text-orange-400" />;
       default: return <FileText size={14} className="text-gray-400" />;
     }
   };
 
-  // 通过系统的默认浏览器打开 URL，保证桌面安全体验
+  // 通过系统默认浏览器打开 URL
   const handleOpenUrl = async (url: string) => {
     try {
       await open(url);
@@ -66,40 +69,51 @@ export default function MessageItem({
     }
   };
 
-  // 💡 现代化时序判定 1：
-  // 只有在【加载状态彻底结束】且【依然没有任何文本及引用信源】时，才判定为“幽灵空消息”并进行物理隐藏
-  const isMessageTrulyEmpty = msg.sender === 'ai' && !msg.text && (!msg.sources || msg.sources.length === 0) && !isParentLoading;
+  /**
+   * 关键修复说明：
+   * 1. 旧逻辑把“全局 isLoading”直接套到每条 AI 消息上；
+   * 2. 当用户发起下一轮请求时，历史 AI 消息也会被误判为“仍在加载”，导致元数据不显示；
+   * 3. 现在改成：
+   *    - 仅当当前 AI 消息“无文本、无来源、且父级仍在加载”时，显示思考提示；
+   *    - 若无文本、无来源、且父级已结束加载，则视为真正空消息并隐藏；
+   *    - 只要当前消息已有文本，就立即渲染 Markdown，不受其他消息 loading 干扰。
+   */
+  const hasText = !!msg.text?.trim();
+  const hasSources = !!(msg.sources && msg.sources.length > 0);
+
+  const isCurrentlyThinking = isAi && !hasText && !hasSources && isParentLoading;
+  const isMessageTrulyEmpty = isAi && !hasText && !hasSources && !isParentLoading;
+  const shouldShowMarkdown = isAi && hasText;
+
+  /**
+   * 元数据显示规则优化：
+   * - 对当前这条 AI 消息而言，只要已经有文本，就可以显示元数据；
+   * - 不再因为父级全局 loading 而把历史消息元数据全部隐藏。
+   * - Token 可能在流式末尾才完整，因此这里允许先显示 provider/model/time，token 后续自然更新。
+   */
+  const shouldShowMetadata = isAi && !msg.isEditing && hasText;
+
   if (isMessageTrulyEmpty) {
-    return null; 
+    return null;
   }
 
-  // 💡 现代化时序判定 2：
-  // 在加载思考中且内容还是空的时，判定为正在思考
-  const isCurrentlyThinking = msg.sender === 'ai' && !msg.text && isParentLoading;
-
-  // 💡 现代化时序判定 3：
-  // 只要大模型开始吐字（msg.text 不为空），文本框就需要立即显示（即使 isLoading 仍为 true）
-  const shouldShowMarkdown = msg.sender === 'ai' && msg.text;
-
-  // 💡 现代化时序判定 4：
-  // 只有在流式完全传输结束（isParentLoading 结束）之后，底部模型调用元数据才淡入显示
-  const shouldShowMetadata = msg.sender === 'ai' && !msg.isEditing && !isParentLoading && msg.text;
-
   return (
-    <div className={`flex gap-4 ${isUser ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-200`}>
-      {!isUser && msg.sender !== 'system_err' && (
-        <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-amber-600 to-orange-400 flex items-center justify-center text-xs shrink-0 select-none shadow-md">🤖</div>
+    <div className={`flex gap-4 ${isUser ? "justify-end" : "justify-start"} animate-in fade-in slide-in-from-bottom-2 duration-200`}>
+      {!isUser && !isSystemError && (
+        <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-amber-600 to-orange-400 flex items-center justify-center text-xs shrink-0 select-none shadow-md">
+          🤖
+        </div>
       )}
-      
-      <div 
+
+      <div
         onContextMenu={(e) => onMsgContextMenu(e, msg.id, msg.sender)}
         style={{ fontSize: chatFontSize }}
         className={`max-w-[85%] w-fit p-3.5 rounded-xl leading-relaxed flex flex-col gap-2 cursor-context-menu select-text transition-all duration-150 hover:ring-1 hover:ring-white/5 relative group ${
-          isUser 
-            ? 'bg-[#2b6cb0] text-white rounded-tr-none ml-auto' 
-            : msg.sender === 'system_err'
-            ? 'bg-[#5c2d2d] text-red-200 border border-[#8c3d3d]'
-            : 'bg-[#2e2e2e] text-gray-200 border border-[#3a3a3a] rounded-tl-none'
+          isUser
+            ? "bg-[#2b6cb0] text-white rounded-tr-none ml-auto"
+            : isSystemError
+            ? "bg-[#5c2d2d] text-red-200 border border-[#8c3d3d]"
+            : "bg-[#2e2e2e] text-gray-200 border border-[#3a3a3a] rounded-tl-none"
         }`}
       >
         <div className="w-fit max-w-full">
@@ -131,22 +145,21 @@ export default function MessageItem({
             </div>
           ) : (
             <>
-              {msg.sender === 'ai' ? (
+              {isAi ? (
                 <div className="flex flex-col gap-2 min-w-[150px]">
-                  
-                  {/* 【思考阶段】：完全没字时，展现小圆点呼吸思考提示，隐藏空的文本框 */}
+                  {/* 思考阶段：仅对当前空 AI 消息展示 */}
                   {isCurrentlyThinking && (
                     <div className="flex items-center gap-2 text-xs text-amber-500/80 font-mono py-1 select-none animate-pulse">
                       <div className="flex space-x-1 items-center">
-                        <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                        <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                        <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                        <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                        <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                        <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                       </div>
                       <span className="text-[10px] tracking-wider ml-1">AI 正在深度思考并组织语言...</span>
                     </div>
                   )}
 
-                  {/* 当 AI 返回了 sources 时，渲染 Fluent 风格的折叠检索轨迹 */}
+                  {/* 联网引用源折叠区 */}
                   {msg.sources && msg.sources.length > 0 && (
                     <div className="mb-2 border border-[#3d4a3e] bg-[#232b24]/50 rounded-lg p-2 text-xs text-[#a9d1b1] w-full font-sans shadow-sm select-none">
                       <button
@@ -166,7 +179,6 @@ export default function MessageItem({
                         </div>
                       </button>
 
-                      {/* 展开的动作轨迹和源链接 */}
                       {isSourcesOpen && (
                         <div className="mt-2 pt-2 border-t border-[#344035] space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-150">
                           <div className="flex flex-col gap-1 text-[10px] text-[#8cb096]">
@@ -198,11 +210,10 @@ export default function MessageItem({
                     </div>
                   )}
 
-                  {/* 【流式输出阶段】：只要有字（shouldShowMarkdown 为 true），MarkdownMessage 立即无障碍、非阻塞渲染展示 */}
+                  {/* 只要 AI 有文本，就立即渲染 */}
                   {shouldShowMarkdown && (
                     <MarkdownMessage text={msg.text} fontSize={chatFontSize} />
                   )}
-                  
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
@@ -228,14 +239,14 @@ export default function MessageItem({
 
         {isUser && hasBranches && !msg.isEditing && (
           <div className="mt-1 flex items-center justify-end gap-1.5 text-[10px] text-blue-200/80 font-mono select-none">
-            <button 
+            <button
               onClick={() => onSwitchBranch(msg.id, "prev")}
               className="p-0.5 hover:bg-white/10 rounded transition-colors cursor-pointer"
             >
               <ChevronLeft size={10} />
             </button>
             <span>{`${activeIdx + 1} / ${branchesCount}`}</span>
-            <button 
+            <button
               onClick={() => onSwitchBranch(msg.id, "next")}
               className="p-0.5 hover:bg-white/10 rounded transition-colors cursor-pointer"
             >
@@ -244,7 +255,6 @@ export default function MessageItem({
           </div>
         )}
 
-        {/* 【元数据阶段】：流式加载彻底结束（isParentLoading 为 false）时，元数据平滑淡入呈现，避免流式打字期间文字抖动 */}
         {shouldShowMetadata && (
           <div className="mt-1 pt-1.5 border-t border-white/5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-gray-500 font-mono select-none animate-in fade-in duration-500">
             <span>提供商: <strong className="text-gray-400 font-medium">{msg.provider || "未知"}</strong></span>
