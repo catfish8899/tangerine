@@ -56,13 +56,13 @@ export function getNodeSize(node: AutomationFlowNode): FlowSize {
         : undefined;
 
   const fallbackByType: Record<AutomationNodeKind, FlowSize> = {
-    role: { width: 180, height: 88 },
-    tool: { width: 180, height: 78 },
-    trigger: { width: 150, height: 52 },
+    role: { width: 220, height: 126 },
+    tool: { width: 220, height: 112 },
+    trigger: { width: 190, height: 92 },
     collection: { width: 360, height: 260 },
-    conversation: { width: 240, height: 150 },
-    hardware: { width: 180, height: 78 },
-    timer: { width: 240, height: 116 }
+    conversation: { width: 250, height: 184 },
+    hardware: { width: 220, height: 112 },
+    timer: { width: 250, height: 150 }
   };
 
   const fallback = fallbackByType[node.data.automationType] || { width: 180, height: 88 };
@@ -224,11 +224,19 @@ export function buildAutomationNode(
       type: "automationRoleNode",
       position,
       data: {
-        title: template.title,
-        subtitle: template.subtitle || "角色节点",
-        description: template.description,
+        title: "角色",
+        subtitle: "请选择角色",
+        description: "在节点内部下拉选单中选择具体角色。",
         automationType: "role",
-        payload: template.payload
+        payload: {
+          ...(template.payload || {}),
+          roleId: String(template.payload?.roleId || ""),
+          roleName: String(template.payload?.roleName || ""),
+          systemPrompt: String(template.payload?.systemPrompt || "")
+        }
+      },
+      style: {
+        width: 220
       }
     };
   }
@@ -239,14 +247,19 @@ export function buildAutomationNode(
       type: "automationToolNode",
       position,
       data: {
-        title: "联网搜索",
-        subtitle: undefined,
+        title: "工具",
+        subtitle: "请选择工具",
         description: undefined,
         automationType: "tool",
         payload: {
           ...(template.payload || {}),
-          toolName: "Tavily / Web Search"
+          toolType: String(template.payload?.toolType || "web_search"),
+          toolName: String(template.payload?.toolName || "Tavily / Web Search"),
+          webSearchMode: String(template.payload?.webSearchMode || "direct")
         }
+      },
+      style: {
+        width: 220
       }
     };
   }
@@ -257,11 +270,17 @@ export function buildAutomationNode(
       type: "automationTriggerNode",
       position,
       data: {
-        title: "开始对话",
-        subtitle: undefined,
+        title: "开关",
+        subtitle: "请选择开关",
         description: undefined,
         automationType: "trigger",
-        payload: template.payload
+        payload: {
+          ...(template.payload || {}),
+          triggerType: String(template.payload?.triggerType || "start_chat")
+        }
+      },
+      style: {
+        width: 190
       }
     };
   }
@@ -272,11 +291,14 @@ export function buildAutomationNode(
       type: "automationCollectionNode",
       position,
       data: {
-        title: template.title,
-        subtitle: template.subtitle || "集合区域",
+        title: "集合",
+        subtitle: "请选择集合类型",
         description: template.description,
         automationType: "collection",
-        payload: template.payload
+        payload: {
+          ...(template.payload || {}),
+          collectionType: String(template.payload?.collectionType || "area")
+        }
       },
       style: {
         width: 360,
@@ -293,15 +315,17 @@ export function buildAutomationNode(
       position,
       data: {
         title: "对话",
-        subtitle: undefined,
+        subtitle: "请选择对话类型",
         description: undefined,
         automationType: "conversation",
         payload: {
-          content: ""
+          ...(template.payload || {}),
+          conversationType: String(template.payload?.conversationType || "text_input"),
+          content: String(template.payload?.content || "")
         }
       },
       style: {
-        width: 240
+        width: 250
       }
     };
   }
@@ -313,12 +337,16 @@ export function buildAutomationNode(
       position,
       data: {
         title: "硬件",
-        subtitle: undefined,
+        subtitle: "请选择硬件动作",
         description: undefined,
         automationType: "hardware",
         payload: {
-          hardwareAction: "connect_hardware"
+          ...(template.payload || {}),
+          hardwareAction: String(template.payload?.hardwareAction || "connect_hardware")
         }
+      },
+      style: {
+        width: 220
       }
     };
   }
@@ -329,15 +357,17 @@ export function buildAutomationNode(
     position,
     data: {
       title: "定时",
-      subtitle: undefined,
+      subtitle: "请选择定时类型",
       description: undefined,
       automationType: "timer",
       payload: {
-        timerText: ""
+        ...(template.payload || {}),
+        timerType: String(template.payload?.timerType || "specific_datetime"),
+        timerText: String(template.payload?.timerText || "")
       }
     },
     style: {
-      width: 240
+      width: 250
     }
   };
 }

@@ -1,7 +1,6 @@
 // src/components/automation/AutomationToolbar.tsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo } from "react";
 import {
-  ChevronUp,
   Clock3,
   Cpu,
   Globe2,
@@ -30,121 +29,36 @@ function TemplateIcon({
   return <Globe2 size={size} />;
 }
 
-function ToolbarMenu({
-  label,
-  icon,
-  accentClass,
-  items,
-  onBeforeOpen,
+function DraggableCategoryButton({
+  template,
   draggingTemplate,
-  onTemplatePointerDown
+  onPointerDown
 }: {
-  label: string;
-  icon: React.ReactNode;
-  accentClass: string;
-  items: AutomationTemplate[];
-  onBeforeOpen?: () => void;
+  template: AutomationTemplate;
   draggingTemplate: AutomationTemplate | null;
-  onTemplatePointerDown: (event: React.PointerEvent, template: AutomationTemplate) => void;
+  onPointerDown: (event: React.PointerEvent, template: AutomationTemplate) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const closeTimerRef = useRef<number | null>(null);
-
-  const clearCloseTimer = () => {
-    if (closeTimerRef.current !== null) {
-      window.clearTimeout(closeTimerRef.current);
-      closeTimerRef.current = null;
-    }
-  };
-
-  const handleMouseEnter = () => {
-    clearCloseTimer();
-    onBeforeOpen?.();
-    setOpen(true);
-  };
-
-  const handleMouseLeave = () => {
-    clearCloseTimer();
-    closeTimerRef.current = window.setTimeout(() => {
-      setOpen(false);
-      closeTimerRef.current = null;
-    }, 180);
-  };
-
-  useEffect(() => {
-    return () => clearCloseTimer();
-  }, []);
+  const isDragging = draggingTemplate?.id === template.id;
 
   return (
-    <div
-      className="relative"
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+    <button
+      type="button"
+      onPointerDown={(event) => onPointerDown(event, template)}
+      className={`group flex flex-col items-center gap-1 rounded-xl p-2 transition-colors ${
+        isDragging ? "cursor-grabbing bg-white/10" : "cursor-grab hover:bg-white/10"
+      }`}
+      title={`拖拽“${template.title}”节点到画布`}
     >
-      {open && (
-        <>
-          <div className="absolute bottom-full left-1/2 h-3 w-64 -translate-x-1/2" />
-
-          <div
-            className="absolute bottom-full left-1/2 mb-3 w-64 -translate-x-1/2 rounded-2xl border border-[#333] bg-[#1f1f1f]/95 p-2 shadow-2xl backdrop-blur-xl"
-            onMouseEnter={handleMouseEnter}
-          >
-            <div className="mb-1 flex items-center gap-1.5 px-2 py-1 text-[10px] font-bold text-gray-500">
-              <ChevronUp size={12} />
-              <span>{label}菜单</span>
-            </div>
-
-            <div className="max-h-64 space-y-1 overflow-y-auto pr-1">
-              {items.map((item) => (
-                <div
-                  key={item.id}
-                  onPointerDown={(event) => {
-                    if (item.disabled) return;
-                    onTemplatePointerDown(event, item);
-                  }}
-                  className={`flex items-center gap-2 rounded-xl border px-2.5 py-2 transition-colors ${
-                    item.disabled
-                      ? "cursor-not-allowed border-[#333] bg-[#222]/70 opacity-50"
-                      : draggingTemplate?.id === item.id
-                        ? "cursor-grabbing border-white/15 bg-white/10"
-                        : "cursor-grab border-transparent hover:border-white/10 hover:bg-white/10"
-                  }`}
-                >
-                  <div
-                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${item.colorClass}`}
-                  >
-                    <TemplateIcon icon={item.icon} size={15} />
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[11px] font-semibold text-gray-200">
-                      {item.title}
-                    </div>
-                    {item.subtitle && (
-                      <div className="truncate text-[10px] text-gray-500">
-                        {item.subtitle}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </>
-      )}
-
-      <button
-        type="button"
-        className="group flex flex-col items-center gap-1 rounded-xl p-2 transition-colors hover:bg-white/10"
+      <div
+        className={`flex h-10 w-10 items-center justify-center rounded-lg border transition-transform group-hover:scale-110 ${template.colorClass}`}
       >
-        <div
-          className={`flex h-10 w-10 items-center justify-center rounded-lg border transition-transform group-hover:scale-110 ${accentClass}`}
-        >
-          {icon}
-        </div>
-        <span className="text-[10px] font-medium text-gray-400">{label}</span>
-      </button>
-    </div>
+        <TemplateIcon icon={template.icon} size={18} />
+      </div>
+
+      <span className="text-[10px] font-medium text-gray-400">
+        {template.title}
+      </span>
+    </button>
   );
 }
 
@@ -159,109 +73,106 @@ export default function AutomationFloatingToolbar({
   draggingTemplate: AutomationTemplate | null;
   onTemplatePointerDown: (event: React.PointerEvent, template: AutomationTemplate) => void;
 }) {
-  const toolItems: AutomationTemplate[] = useMemo(
+  /**
+   * 说明：
+   * 现在底部栏不再展开“细分节点菜单”。
+   * 用户直接把类目节点拖入画布，然后在节点内部的下拉选单中选择具体细分项。
+   *
+   * roleItems / onReloadRoles 仍保留在 props 中，是为了不破坏 FlowEditor 现有调用结构。
+   * 角色具体列表改为由角色节点内部读取 localStorage 并展示下拉选单。
+   */
+  void roleItems;
+  void onReloadRoles;
+
+  const categoryTemplates: AutomationTemplate[] = useMemo(
     () => [
       {
-        id: "tool-web-search",
+        id: "category-role",
+        nodeKind: "role",
+        title: "角色",
+        subtitle: "拖入后选择角色",
+        description: "拖入画布后，可在节点内部选择具体角色。",
+        icon: "role",
+        colorClass: "bg-amber-500/20 border-amber-500/40 text-amber-400",
+        payload: {
+          roleId: "",
+          roleName: "",
+          systemPrompt: ""
+        }
+      },
+      {
+        id: "category-tool",
         nodeKind: "tool",
-        title: "联网搜索",
-        subtitle: "Tavily / Web Search",
-        description: "允许工作流节点调用联网检索能力，用于获取实时网页信息。",
-        icon: "web",
+        title: "工具",
+        subtitle: "拖入后选择工具",
+        description: "拖入画布后，可在节点内部选择具体工具。",
+        icon: "tool",
         colorClass: "bg-blue-500/20 border-blue-500/40 text-blue-400",
         payload: {
           toolType: "web_search",
           toolName: "Tavily / Web Search",
           webSearchMode: "direct"
         }
-      }
-    ],
-    []
-  );
-
-  const triggerItems: AutomationTemplate[] = useMemo(
-    () => [
+      },
       {
-        id: "trigger-start-chat",
+        id: "category-trigger",
         nodeKind: "trigger",
-        title: "开始对话",
-        subtitle: "工作流入口按钮",
-        description: "作为自动化流程的入口节点，后续将用于启动对话链路。",
+        title: "开关",
+        subtitle: "拖入后选择入口",
+        description: "拖入画布后，可在节点内部选择具体入口或开关类型。",
         icon: "trigger",
         colorClass: "bg-emerald-500/20 border-emerald-500/40 text-emerald-400",
         payload: {
           triggerType: "start_chat"
         }
-      }
-    ],
-    []
-  );
-
-  const collectionItems: AutomationTemplate[] = useMemo(
-    () => [
+      },
       {
-        id: "collection-area",
+        id: "category-collection",
         nodeKind: "collection",
-        title: "集合区域",
-        subtitle: "可调大小的范围框",
-        description: "用于在画布中划分流程区域。选中后可拖动边缘调整大小。",
+        title: "集合",
+        subtitle: "拖入后选择集合类型",
+        description: "拖入画布后，可在节点内部选择具体集合类型。",
         icon: "collection",
         colorClass: "bg-purple-500/20 border-purple-500/40 text-purple-400",
         payload: {
           collectionType: "area"
         }
-      }
-    ],
-    []
-  );
-
-  const conversationItems: AutomationTemplate[] = useMemo(
-    () => [
+      },
       {
-        id: "conversation-input",
+        id: "category-conversation",
         nodeKind: "conversation",
         title: "对话",
-        subtitle: "可输入内容",
-        description: "用于在自动化流程中记录或传递一段对话内容。",
+        subtitle: "拖入后选择对话类型",
+        description: "拖入画布后，可在节点内部选择具体对话节点类型。",
         icon: "conversation",
         colorClass: "bg-cyan-500/20 border-cyan-500/40 text-cyan-300",
         payload: {
+          conversationType: "text_input",
           content: ""
         }
-      }
-    ],
-    []
-  );
-
-  const hardwareItems: AutomationTemplate[] = useMemo(
-    () => [
+      },
       {
-        id: "hardware-connect",
+        id: "category-hardware",
         nodeKind: "hardware",
         title: "硬件",
-        subtitle: "连接硬件",
-        description: "用于后续接入本地或外部硬件能力。",
+        subtitle: "拖入后选择硬件动作",
+        description: "拖入画布后，可在节点内部选择具体硬件动作。",
         icon: "hardware",
         colorClass: "bg-slate-500/20 border-slate-400/40 text-slate-300",
         payload: {
           hardwareAction: "connect_hardware"
         }
-      }
-    ],
-    []
-  );
-
-  const timerItems: AutomationTemplate[] = useMemo(
-    () => [
+      },
       {
-        id: "timer-input",
+        id: "category-timer",
         nodeKind: "timer",
         title: "定时",
-        subtitle: "年月日，12小时制",
-        description: "用于设置自动化流程触发或执行时间。",
+        subtitle: "拖入后选择定时类型",
+        description: "拖入画布后，可在节点内部选择具体定时类型。",
         icon: "timer",
         colorClass: "bg-rose-500/20 border-rose-500/40 text-rose-300",
         payload: {
+          timerType: "specific_datetime",
           timerText: ""
         }
       }
@@ -271,69 +182,14 @@ export default function AutomationFloatingToolbar({
 
   return (
     <div className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-[#333] bg-[#1f1f1f]/90 px-5 py-3 shadow-2xl backdrop-blur-xl">
-      <ToolbarMenu
-        label="角色"
-        icon={<UserSquare2 size={18} />}
-        accentClass="bg-amber-500/20 border-amber-500/40 text-amber-400"
-        items={roleItems}
-        onBeforeOpen={onReloadRoles}
-        draggingTemplate={draggingTemplate}
-        onTemplatePointerDown={onTemplatePointerDown}
-      />
-
-      <ToolbarMenu
-        label="工具"
-        icon={<Wrench size={18} />}
-        accentClass="bg-blue-500/20 border-blue-500/40 text-blue-400"
-        items={toolItems}
-        draggingTemplate={draggingTemplate}
-        onTemplatePointerDown={onTemplatePointerDown}
-      />
-
-      <ToolbarMenu
-        label="开关"
-        icon={<PlayCircle size={18} />}
-        accentClass="bg-emerald-500/20 border-emerald-500/40 text-emerald-400"
-        items={triggerItems}
-        draggingTemplate={draggingTemplate}
-        onTemplatePointerDown={onTemplatePointerDown}
-      />
-
-      <ToolbarMenu
-        label="集合"
-        icon={<Layers size={18} />}
-        accentClass="bg-purple-500/20 border-purple-500/40 text-purple-400"
-        items={collectionItems}
-        draggingTemplate={draggingTemplate}
-        onTemplatePointerDown={onTemplatePointerDown}
-      />
-
-      <ToolbarMenu
-        label="对话"
-        icon={<MessageCircle size={18} />}
-        accentClass="bg-cyan-500/20 border-cyan-500/40 text-cyan-300"
-        items={conversationItems}
-        draggingTemplate={draggingTemplate}
-        onTemplatePointerDown={onTemplatePointerDown}
-      />
-
-      <ToolbarMenu
-        label="硬件"
-        icon={<Cpu size={18} />}
-        accentClass="bg-slate-500/20 border-slate-400/40 text-slate-300"
-        items={hardwareItems}
-        draggingTemplate={draggingTemplate}
-        onTemplatePointerDown={onTemplatePointerDown}
-      />
-
-      <ToolbarMenu
-        label="定时"
-        icon={<Clock3 size={18} />}
-        accentClass="bg-rose-500/20 border-rose-500/40 text-rose-300"
-        items={timerItems}
-        draggingTemplate={draggingTemplate}
-        onTemplatePointerDown={onTemplatePointerDown}
-      />
+      {categoryTemplates.map((template) => (
+        <DraggableCategoryButton
+          key={template.id}
+          template={template}
+          draggingTemplate={draggingTemplate}
+          onPointerDown={onTemplatePointerDown}
+        />
+      ))}
     </div>
   );
 }
