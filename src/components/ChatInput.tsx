@@ -10,7 +10,6 @@ import {
   FileSpreadsheet,
   FileImage,
   Globe,
-  BrainCircuit,
   UserSquare2,
   Eye
 } from "lucide-react";
@@ -39,8 +38,8 @@ interface ChatInputProps {
   onRemoveAttachment: (idx: number) => void;
   onPreviewImage: (file: AttachmentFile) => void;
   onSendMessage: () => void;
-  webSearchMode: 'off' | 'direct' | 'agent';
-  setWebSearchMode: (mode: 'off' | 'direct' | 'agent') => void;
+  webSearchMode: "off" | "agent";
+  setWebSearchMode: (mode: "off" | "agent") => void;
 
   // 角色选择相关
   roles: Role[];
@@ -77,42 +76,34 @@ export default function ChatInput({
   setShowRoleDropdown,
   onSelectRole
 }: ChatInputProps) {
-
-  const renderAttachmentIcon = (type: AttachmentFile['type']) => {
-    switch(type) {
-      case 'image': return <FileImage size={14} className="text-emerald-400" />;
-      case 'audio': return <FileAudio size={14} className="text-purple-400" />;
-      case 'code': return <FileCode size={14} className="text-blue-400" />;
-      case 'office': return <FileSpreadsheet size={14} className="text-orange-400" />;
-      default: return <FileText size={14} className="text-gray-400" />;
+  const renderAttachmentIcon = (type: AttachmentFile["type"]) => {
+    switch (type) {
+      case "image":
+        return <FileImage size={14} className="text-emerald-400" />;
+      case "audio":
+        return <FileAudio size={14} className="text-purple-400" />;
+      case "code":
+        return <FileCode size={14} className="text-blue-400" />;
+      case "office":
+        return <FileSpreadsheet size={14} className="text-orange-400" />;
+      default:
+        return <FileText size={14} className="text-gray-400" />;
     }
   };
 
   const handleToggleSearchMode = () => {
-    if (webSearchMode === 'off') {
-      setWebSearchMode('direct');
-    } else if (webSearchMode === 'direct') {
-      setWebSearchMode('agent');
-    } else {
-      setWebSearchMode('off');
-    }
+    setWebSearchMode(webSearchMode === "off" ? "agent" : "off");
   };
 
   const getSearchButtonStyles = () => {
-    if (webSearchMode === 'direct') {
+    if (webSearchMode === "agent") {
       return {
-        classes: "bg-[#2d3a32] text-emerald-400 border border-[#1e4620] hover:bg-[#34463a]",
-        title: "联网直接检索：直接利用您的输入搜索网络一轮，快速且省 Token",
-        label: "直接检索"
+        classes: "bg-[#2b3a4a] text-sky-400 border border-[#1e3d4e] hover:bg-[#344a5e]",
+        title: "Tavily网络搜索：由模型结合 Tavily 网络检索能力进行信息补充与验证",
+        label: "Tavily网络搜索"
       };
     }
-    if (webSearchMode === 'agent') {
-      return {
-        classes: "bg-[#2b3a4a] text-sky-400 border border-[#1e3d4e] hover:bg-[#344a5e] animate-pulse",
-        title: "模型自主检索：由大模型思考构建搜索词并自主判断，最多检索3轮",
-        label: "模型检索"
-      };
-    }
+
     return {
       classes: "text-gray-400 hover:text-white hover:bg-[#3a3a3a] border border-transparent",
       title: "联网搜索关闭：纯模型直接回答",
@@ -137,7 +128,7 @@ export default function ChatInput({
     if (!option) return "bg-sky-400";
 
     return option.category === "ollama"
-      ? "bg-emerald-400 animate-pulse"
+      ? "bg-emerald-400"
       : "bg-sky-400";
   };
 
@@ -155,7 +146,6 @@ export default function ChatInput({
   return (
     <div className="p-5 md:p-6 bg-[#202020] border-t border-[#282828] shrink-0 relative">
       <div className="max-w-3xl mx-auto bg-[#2e2e2e] rounded-2xl border border-[#3e3e3e] shadow-[0_12px_40px_rgba(0,0,0,0.22)] flex flex-col px-3 pt-3 pb-2 focus-within:border-[#555] transition-all">
-
         {/* 附件预览框卡片栏 */}
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 px-2 pb-2 border-b border-[#3e3e3e] mb-2 animate-in fade-in duration-100">
@@ -237,7 +227,7 @@ export default function ChatInput({
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
+            if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               onSendMessage();
             }
@@ -263,11 +253,7 @@ export default function ChatInput({
               title={btnStyles.title}
               className={`p-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer text-xs ${btnStyles.classes}`}
             >
-              {webSearchMode === 'agent' ? (
-                <BrainCircuit size={14} className="text-sky-400" />
-              ) : (
-                <Globe size={14} className={webSearchMode === 'direct' ? "animate-spin-slow text-emerald-400" : ""} />
-              )}
+              <Globe size={14} />
               <span className="text-[10px] font-semibold select-none">{btnStyles.label}</span>
             </button>
 
@@ -297,7 +283,7 @@ export default function ChatInput({
               >
                 <UserSquare2 size={12} />
                 <span className="max-w-[92px] truncate">{getRoleButtonText()}</span>
-                <ChevronUp size={10} className={`transform transition-transform ${showRoleDropdown ? 'rotate-180' : ''}`} />
+                <ChevronUp size={10} className={`transform transition-transform ${showRoleDropdown ? "rotate-180" : ""}`} />
               </button>
 
               {showRoleDropdown && roles.length > 0 && (
@@ -382,13 +368,12 @@ export default function ChatInput({
               >
                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${getModelDotClass(selectedModel)}`}></span>
                 <span className="truncate">{getModelDisplayText(selectedModel)}</span>
-                <ChevronUp size={10} className={`transform transition-transform shrink-0 ${showModelDropdown ? 'rotate-180' : ''}`} />
+                <ChevronUp size={10} className={`transform transition-transform shrink-0 ${showModelDropdown ? "rotate-180" : ""}`} />
               </button>
 
               {showModelDropdown && (
                 <div className="absolute bottom-full right-0 mb-2 w-72 max-h-64 overflow-y-auto scrollbar-thin bg-[#252526] border border-[#3e3e3e] rounded-xl shadow-2xl py-1 z-50">
                   {availableModels.map((modelName) => {
-                    const option = getModelOption(modelName);
                     const displayText = getModelDisplayText(modelName);
 
                     return (
@@ -421,8 +406,8 @@ export default function ChatInput({
               disabled={(!inputText.trim() && attachments.length === 0) || isLoading}
               className={`w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer ${
                 (inputText.trim() || attachments.length > 0) && !isLoading
-                  ? 'bg-white text-black hover:bg-gray-200 shadow-sm'
-                  : 'bg-[#3e3e3e] text-gray-500 cursor-not-allowed'
+                  ? "bg-white text-black hover:bg-gray-200 shadow-sm"
+                  : "bg-[#3e3e3e] text-gray-500 cursor-not-allowed"
               }`}
             >
               <Send size={12} />

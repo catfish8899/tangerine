@@ -1,5 +1,5 @@
 // src/components/MessageItem.tsx
-// 完整修改版：优化流式空消息判定、避免历史 AI 消息受全局 loading 干扰，并保留现有设计语言
+// 完整修改版：优化流式空消息判定、避免历史 AI 消息受全局 loading 干扰，并统一 Tavily 联网展示图标与文案
 import React, { useState } from "react";
 import {
   ChevronLeft,
@@ -27,7 +27,7 @@ interface MessageItemProps {
   onSaveEdit: (messageId: string, newText: string) => void;
   onCancelEdit: (messageId: string) => void;
   onSwitchBranch: (messageId: string, direction: "prev" | "next") => void;
-  isParentLoading?: boolean; // 父组件全局 loading，仅作为“当前可能仍在流式中”的辅助信号
+  isParentLoading?: boolean;
 }
 
 export default function MessageItem({
@@ -52,11 +52,16 @@ export default function MessageItem({
 
   const renderAttachmentIcon = (type: "image" | "audio" | "code" | "office" | "other") => {
     switch (type) {
-      case "image": return <FileImage size={14} className="text-emerald-400" />;
-      case "audio": return <FileAudio size={14} className="text-purple-400" />;
-      case "code": return <FileCode size={14} className="text-blue-400" />;
-      case "office": return <FileSpreadsheet size={14} className="text-orange-400" />;
-      default: return <FileText size={14} className="text-gray-400" />;
+      case "image":
+        return <FileImage size={14} className="text-emerald-400" />;
+      case "audio":
+        return <FileAudio size={14} className="text-purple-400" />;
+      case "code":
+        return <FileCode size={14} className="text-blue-400" />;
+      case "office":
+        return <FileSpreadsheet size={14} className="text-orange-400" />;
+      default:
+        return <FileText size={14} className="text-gray-400" />;
     }
   };
 
@@ -69,15 +74,6 @@ export default function MessageItem({
     }
   };
 
-  /**
-   * 关键修复说明：
-   * 1. 旧逻辑把“全局 isLoading”直接套到每条 AI 消息上；
-   * 2. 当用户发起下一轮请求时，历史 AI 消息也会被误判为“仍在加载”，导致元数据不显示；
-   * 3. 现在改成：
-   *    - 仅当当前 AI 消息“无文本、无来源、且父级仍在加载”时，显示思考提示；
-   *    - 若无文本、无来源、且父级已结束加载，则视为真正空消息并隐藏；
-   *    - 只要当前消息已有文本，就立即渲染 Markdown，不受其他消息 loading 干扰。
-   */
   const hasText = !!msg.text?.trim();
   const hasSources = !!(msg.sources && msg.sources.length > 0);
 
@@ -85,12 +81,6 @@ export default function MessageItem({
   const isMessageTrulyEmpty = isAi && !hasText && !hasSources && !isParentLoading;
   const shouldShowMarkdown = isAi && hasText;
 
-  /**
-   * 元数据显示规则优化：
-   * - 对当前这条 AI 消息而言，只要已经有文本，就可以显示元数据；
-   * - 不再因为父级全局 loading 而把历史消息元数据全部隐藏。
-   * - Token 可能在流式末尾才完整，因此这里允许先显示 provider/model/time，token 后续自然更新。
-   */
   const shouldShowMetadata = isAi && !msg.isEditing && hasText;
 
   if (isMessageTrulyEmpty) {
@@ -149,7 +139,7 @@ export default function MessageItem({
                 <div className="flex flex-col gap-2 min-w-[150px]">
                   {/* 思考阶段：仅对当前空 AI 消息展示 */}
                   {isCurrentlyThinking && (
-                    <div className="flex items-center gap-2 text-xs text-amber-500/80 font-mono py-1 select-none animate-pulse">
+                    <div className="flex items-center gap-2 text-xs text-amber-500/80 font-mono py-1 select-none">
                       <div className="flex space-x-1 items-center">
                         <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
                         <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
@@ -167,8 +157,8 @@ export default function MessageItem({
                         className="w-full flex items-center justify-between text-left font-semibold focus:outline-none cursor-pointer group/btn"
                       >
                         <div className="flex items-center gap-1.5">
-                          <Globe size={13} className="text-emerald-400 animate-pulse shrink-0" />
-                          <span className="text-emerald-300">Tavily 联网验证完毕</span>
+                          <Globe size={13} className="text-emerald-400 shrink-0" />
+                          <span className="text-emerald-300">Tavily 网络搜索已完成</span>
                           <span className="px-1.5 py-0.5 bg-emerald-950/80 text-emerald-400 text-[9px] rounded font-mono border border-emerald-800/40">
                             {msg.sources.length} 个参考源
                           </span>
@@ -184,11 +174,11 @@ export default function MessageItem({
                           <div className="flex flex-col gap-1 text-[10px] text-[#8cb096]">
                             <div className="flex items-center gap-1.5">
                               <Search size={10} className="text-emerald-400 shrink-0" />
-                              <span>动作过程: 提取多轮检索词，捕获网页正文并去除冗余噪声</span>
+                              <span>动作过程: 基于 Tavily 网络搜索能力提取检索结果并整理网页信息</span>
                             </div>
                             <div className="flex items-center gap-1.5">
                               <CheckCircle2 size={10} className="text-emerald-400 shrink-0" />
-                              <span>语义匹配: 完成多模态融合及引用源格式化输出</span>
+                              <span>结果处理: 完成引用源去重、摘要整理与可点击输出</span>
                             </div>
                           </div>
 

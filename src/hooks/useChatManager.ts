@@ -64,7 +64,8 @@ export function useChatManager() {
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
 
-  const [webSearchMode, setWebSearchMode] = useState<"off" | "direct" | "agent">("off");
+  // 仅保留关闭 / Tavily 网络搜索 两种模式
+  const [webSearchMode, setWebSearchMode] = useState<"off" | "agent">("off");
 
   const [roles, setRoles] = useState<Role[]>(() => {
     const saved = localStorage.getItem(ROLES_STORAGE_KEY);
@@ -716,7 +717,7 @@ export function useChatManager() {
   const handleSendMessage = async (customText?: any, filePathsOverride?: string[]) => {
     if (isLoading) return;
 
-    let userText = typeof customText === "string" ? customText : inputText;
+    const userText = typeof customText === "string" ? customText : inputText;
     const finalFilePaths = filePathsOverride !== undefined ? filePathsOverride : attachments.map(a => a.path);
 
     if (!userText.trim() && finalFilePaths.length === 0) return;
@@ -857,8 +858,6 @@ export function useChatManager() {
           try {
             const parsedData = JSON.parse(rawData);
 
-            // 修复：一旦后端通过 SSE 返回 error，不再只在局部 try 中吞掉，
-            // 而是记录错误并抛到外层 catch，确保 system_err 气泡能被渲染。
             if (parsedData.error) {
               streamErrorMessage = parsedData.error;
               throw new Error(parsedData.error);
@@ -910,7 +909,6 @@ export function useChatManager() {
               return { ...s, messages: updatedMessages };
             }));
           } catch (e: any) {
-            // 如果是模型/后端明确报错，立即中断并进入外层 catch
             if (streamErrorMessage || String(e?.message || "").trim()) {
               throw e;
             }
@@ -919,7 +917,6 @@ export function useChatManager() {
         }
       }
 
-      // 修复：如果服务端在最后一段 buffer 中返回错误但未被 lines 完整消费，也要补解析一次
       if (buffer.trim().startsWith("data: ")) {
         const rawData = buffer.trim().slice(6).trim();
         if (rawData && rawData !== "[DONE]") {
