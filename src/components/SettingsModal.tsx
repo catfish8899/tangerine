@@ -32,7 +32,7 @@ const FONT_SIZE_STORAGE_KEY = "tangerine_font_size";
 
 /**
  * 默认配置说明：
- * 1. 保留现有 DeepSeek / Gemini / Ollama 默认入口，避免破坏旧用户体验；
+ * 1. 保留现有 DeepSeek / Gemini / Ollama 默认入口；
  * 2. 后续业务逻辑不再依赖提供商名称硬编码判断能力；
  * 3. 真正调用时以 baseUrl / envKeyName / providerName 综合决定；
  * 4. 用户可自行将 providerName 改成任意名称，系统会按用户填写名称展示。
@@ -678,7 +678,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           style={{ fontSize: fontSize }}
                           className="max-w-[85%] p-3 rounded-lg bg-[#2b6cb0] text-white rounded-tr-none leading-relaxed"
                         >
-                          什么是热狗🌭？
+                          热狗🌭的起源是什么
                         </div>
                       </div>
                       <div className="flex justify-start">
@@ -686,7 +686,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           style={{ fontSize: fontSize }}
                           className="max-w-[85%] p-3 rounded-lg bg-[#2e2e2e] text-gray-200 border border-[#3a3a3a] rounded-tl-none leading-relaxed"
                         >
-                          热狗是一种包含面包与香肠的食物。
+                          热狗的起源主要与德国和奥地利的香肠传统有关，后来在美国演变成如今常见的“面包夹香肠”形式...
                         </div>
                       </div>
                     </div>

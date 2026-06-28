@@ -99,14 +99,14 @@ export default function ChatInput({
     if (webSearchMode === "agent") {
       return {
         classes: "bg-[#2b3a4a] text-sky-400 border border-[#1e3d4e] hover:bg-[#344a5e]",
-        title: "Tavily网络搜索：由模型结合 Tavily 网络检索能力进行信息补充与验证",
+        title: "Tavily网络搜索：由模型构建搜索提示词，调用 Tavily 网络搜索服务",
         label: "Tavily网络搜索"
       };
     }
 
     return {
       classes: "text-gray-400 hover:text-white hover:bg-[#3a3a3a] border border-transparent",
-      title: "联网搜索关闭：纯模型直接回答",
+      title: "联网搜索关闭",
       label: "联网关闭"
     };
   };
@@ -222,7 +222,7 @@ export default function ChatInput({
 
         <textarea
           rows={2}
-          placeholder={isLoading ? "请等待当前回复完成..." : "在此处输入聊天内容，点击纸夹或直接拖拽文件到聊天区域..."}
+          placeholder={isLoading ? "请等待当前回复完成..." : "在此处输入聊天内容，点击别针或拖拽文件到聊天区域..."}
           disabled={isLoading}
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
@@ -346,7 +346,7 @@ export default function ChatInput({
 
                   {!canSelectRole && (
                     <div className="px-3 py-2 text-[10px] text-amber-400/80 border-t border-[#343434] mt-1">
-                      当前会话已有消息，角色已锁定不可切换。
+                      当前会话已有消息，角色已锁定不可切换
                     </div>
                   )}
                 </div>
@@ -436,7 +436,6 @@ export default function ChatInput({
           </div>
         )}
       </div>
-      <div className="text-center text-[10px] text-gray-500 mt-2">AI 的回答可能有误，请检查重要信息</div>
     </div>
   );
 }

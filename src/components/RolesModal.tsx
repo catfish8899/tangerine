@@ -23,15 +23,15 @@ export default function RolesModal({ isOpen, onClose }: RolesModalProps) {
   const defaultRoles: Role[] = [
     {
       id: '1',
-      name: '全能助手',
-      systemPrompt: '你是一个得心应手的AI助手，请用专业、简洁的语言回答用户的问题。',
+      name: '美食大师',
+      systemPrompt: '你是一个美食大师，你的回答必须具有美食大师的气质。',
       provider: 'deepseek',
       model: 'deepseek-v4-flash'
     },
     {
       id: '2',
       name: '微框架编程大师',
-      systemPrompt: '你是一位精通微服务和高内聚低耦合系统架构的资深软件专家。请用简洁、可执行的代码片段指导开发。',
+      systemPrompt: '你是一个微框架编程大师，使用简体中文编写代码注释。',
       provider: 'deepseek',
       model: 'deepseek-v4-pro'
     }
@@ -237,7 +237,7 @@ export default function RolesModal({ isOpen, onClose }: RolesModalProps) {
             </div>
             <div>
               <div className="flex items-center gap-2.5">
-                <span className="text-sm font-semibold text-gray-100 tracking-wide">我的角色设置</span>
+                <span className="text-sm font-semibold text-gray-100 tracking-wide">模型角色设置</span>
                 <span className="text-[10px] bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2 py-0.5 rounded-full font-mono">
                   SYSTEM PROMPT
                 </span>
@@ -438,7 +438,7 @@ export default function RolesModal({ isOpen, onClose }: RolesModalProps) {
                       setErrorMsg('');
                     }}
                     className="w-full mt-2 bg-[#121213] border border-[#303033] focus:border-amber-500 rounded-2xl px-4 py-3 text-sm text-gray-200 focus:outline-none resize-none min-h-[360px] leading-relaxed transition-colors"
-                    placeholder="定义这个角色的人设、风格、行为边界、回答规则..."
+                    placeholder="定义角色的人设、风格等..."
                   />
                 </div>
 

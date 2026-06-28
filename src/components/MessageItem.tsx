@@ -1,5 +1,4 @@
 // src/components/MessageItem.tsx
-// 完整修改版：优化流式空消息判定、避免历史 AI 消息受全局 loading 干扰，并统一 Tavily 联网展示图标与文案
 import React, { useState } from "react";
 import {
   ChevronLeft,
@@ -47,7 +46,7 @@ export default function MessageItem({
   const activeIdx = msg.activeBranchIndex ?? 0;
   const branchesCount = msg.branches ? msg.branches.length : 0;
 
-  // 控制网络搜索引用源抽屉的展开与折叠状态
+  // 控制网络搜索抽屉的展开与折叠状态
   const [isSourcesOpen, setIsSourcesOpen] = useState(false);
 
   const renderAttachmentIcon = (type: "image" | "audio" | "code" | "office" | "other") => {
@@ -65,12 +64,12 @@ export default function MessageItem({
     }
   };
 
-  // 通过系统默认浏览器打开 URL
+  // 通过默认浏览器打开 URL
   const handleOpenUrl = async (url: string) => {
     try {
       await open(url);
     } catch (err) {
-      console.error("无法调用系统浏览器打开 URL: ", err);
+      console.error("无法调用默认浏览器打开 URL: ", err);
     }
   };
 
@@ -137,7 +136,7 @@ export default function MessageItem({
             <>
               {isAi ? (
                 <div className="flex flex-col gap-2 min-w-[150px]">
-                  {/* 思考阶段：仅对当前空 AI 消息展示 */}
+                  {/* AI 处理阶段：仅对当前空 AI 消息展示 */}
                   {isCurrentlyThinking && (
                     <div className="flex items-center gap-2 text-xs text-amber-500/80 font-mono py-1 select-none">
                       <div className="flex space-x-1 items-center">
@@ -145,11 +144,11 @@ export default function MessageItem({
                         <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
                         <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                       </div>
-                      <span className="text-[10px] tracking-wider ml-1">AI 正在深度思考并组织语言...</span>
+                      <span className="text-[10px] tracking-wider ml-1">AI 正在处理...</span>
                     </div>
                   )}
 
-                  {/* 联网引用源折叠区 */}
+                  {/* 网页链接折叠区 */}
                   {msg.sources && msg.sources.length > 0 && (
                     <div className="mb-2 border border-[#3d4a3e] bg-[#232b24]/50 rounded-lg p-2 text-xs text-[#a9d1b1] w-full font-sans shadow-sm select-none">
                       <button
@@ -160,7 +159,7 @@ export default function MessageItem({
                           <Globe size={13} className="text-emerald-400 shrink-0" />
                           <span className="text-emerald-300">Tavily 网络搜索已完成</span>
                           <span className="px-1.5 py-0.5 bg-emerald-950/80 text-emerald-400 text-[9px] rounded font-mono border border-emerald-800/40">
-                            {msg.sources.length} 个参考源
+                            {msg.sources.length} 个网页
                           </span>
                         </div>
                         <div className="flex items-center gap-1 text-[#8fb997] group-hover/btn:text-emerald-200 transition-colors">
@@ -174,15 +173,15 @@ export default function MessageItem({
                           <div className="flex flex-col gap-1 text-[10px] text-[#8cb096]">
                             <div className="flex items-center gap-1.5">
                               <Search size={10} className="text-emerald-400 shrink-0" />
-                              <span>动作过程: 基于 Tavily 网络搜索能力提取检索结果并整理网页信息</span>
+                              <span>动作过程: 基于 Tavily 网络搜索服务提取检索结果并整理网页信息</span>
                             </div>
                             <div className="flex items-center gap-1.5">
                               <CheckCircle2 size={10} className="text-emerald-400 shrink-0" />
-                              <span>结果处理: 完成引用源去重、摘要整理与可点击输出</span>
+                              <span>结果处理: 完成网页去重、摘要整理与链接输出</span>
                             </div>
                           </div>
 
-                          <div className="text-[10px] font-semibold text-emerald-400 mt-1.5">已采信的引用信源（点击唤起浏览器查看）：</div>
+                          <div className="text-[10px] font-semibold text-emerald-400 mt-1.5">搜索到的网页（点击以默认浏览器查看）：</div>
                           <div className="grid grid-cols-1 gap-1 max-h-32 overflow-y-auto scrollbar-thin pr-1">
                             {msg.sources.map((src, index) => (
                               <button

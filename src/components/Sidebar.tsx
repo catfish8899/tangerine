@@ -104,7 +104,7 @@ export default function Sidebar({
             className="flex items-center gap-2.5 px-3 py-2 rounded hover:bg-[#252525] hover:text-white cursor-pointer transition-colors"
           >
             <UserSquare2 size={15} />
-            <span>我的角色</span>
+            <span>模型角色</span>
           </div>
 
           <div
