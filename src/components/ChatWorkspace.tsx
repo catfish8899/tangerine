@@ -80,24 +80,6 @@ export default function ChatWorkspace({ state, actions, refs }: ChatWorkspacePro
         )}
 
         <div className="max-w-3xl mx-auto space-y-6">
-
-          {activeRole && activeSession.messages.length > 0 && (
-            <div className="w-full rounded-xl border border-amber-500/20 bg-amber-500/[0.05] px-4 py-3 shadow-[0_0_24px_rgba(245,158,11,0.035)] backdrop-blur-sm">
-              <div className="flex items-center justify-between gap-3 mb-1.5">
-                <div className="flex items-center gap-2 text-amber-400">
-                  <Sparkles size={14} />
-                  <span className="text-[11px] font-bold tracking-wide">
-                    当前会话角色：{activeRole.name}
-                  </span>
-                </div>
-              </div>
-
-              <div className="text-[11px] text-gray-400 leading-relaxed whitespace-pre-wrap italic select-text line-clamp-2">
-                “{activeRole.systemPrompt}”
-              </div>
-            </div>
-          )}
-
           {activeSession.messages.length === 0 ? (
             <div className="min-h-[calc(100vh-280px)] flex flex-col items-center justify-center text-center opacity-95">
               <div className="w-14 h-14 rounded-2xl bg-[#2b2b2b] flex items-center justify-center mb-4 border border-[#3e3e3e] shadow-inner">
@@ -109,9 +91,9 @@ export default function ChatWorkspace({ state, actions, refs }: ChatWorkspacePro
               </h2>
 
               <p className="text-xs text-gray-500 max-w-md leading-relaxed">
-                你可以直接输入消息，也可以通过输入框左下区域选择附件、联网模式与角色设定。
+                你可以直接输入消息，也可以通过输入框左下区域选择附件、联网搜索与角色设定。
                 {roles.length > 0
-                  ? " 当前支持在空白会话中为该对话绑定角色。"
+                  ? " 角色设定将为对话注入专属提示词（注：角色绑定的专属模型仅在自动化画布中生效）。"
                   : " 也可以先到侧边栏“我的角色”创建专属角色。"}
               </p>
 
@@ -119,20 +101,27 @@ export default function ChatWorkspace({ state, actions, refs }: ChatWorkspacePro
                 <ImageIcon size={14} className="text-sky-400" />
                 也支持将文件直接拖拽到聊天区域
               </div>
-
-              {activeRole && (
-                <div className="mt-5 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3 max-w-lg w-full">
-                  <div className="text-[11px] text-amber-300 font-semibold mb-1">
-                    已预选角色：{activeRole.name}
-                  </div>
-                  <div className="text-[11px] text-gray-400 leading-relaxed line-clamp-3">
-                    {activeRole.systemPrompt}
-                  </div>
-                </div>
-              )}
             </div>
           ) : (
             <>
+              {/* 当用户发送第一条消息后，在消息流最顶部（第0条系统消息位置）展示角色设定卡片 */}
+              {activeRole && (
+                <div className="w-full rounded-xl border border-amber-500/20 bg-amber-500/[0.05] px-4 py-3 shadow-[0_0_24px_rgba(245,158,11,0.035)] backdrop-blur-sm animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  <div className="flex items-center justify-between gap-3 mb-1.5">
+                    <div className="flex items-center gap-2 text-amber-400">
+                      <Sparkles size={14} />
+                      <span className="text-[11px] font-bold tracking-wide">
+                        当前会话角色：{activeRole.name}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="text-[11px] text-gray-400 leading-relaxed whitespace-pre-wrap italic select-text line-clamp-2">
+                    “{activeRole.systemPrompt}”
+                  </div>
+                </div>
+              )}
+
               {activeSession.messages.map((msg: any) => (
                 <MessageItem
                   key={msg.id}

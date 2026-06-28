@@ -276,9 +276,9 @@ export default function ChatInput({
                 className={`text-[10px] font-semibold px-2.5 py-1.5 rounded-lg border flex items-center gap-1.5 transition-colors ${
                   roles.length === 0
                     ? "bg-[#232323] border-[#353535] text-gray-600 cursor-not-allowed"
-                    : canSelectRole
-                    ? "bg-[#202020] border-[#353535] text-gray-300 hover:text-white"
-                    : "bg-amber-500/[0.08] border-amber-500/20 text-amber-300"
+                    : activeRole
+                    ? "bg-amber-500/[0.08] border-amber-500/20 text-amber-300 hover:bg-amber-500/[0.15]"
+                    : "bg-[#202020] border-[#353535] text-gray-300 hover:text-white"
                 }`}
               >
                 <UserSquare2 size={12} />
@@ -338,8 +338,8 @@ export default function ChatInput({
                       </div>
                       <span className="text-[9px] text-gray-500 font-normal mt-0.5 line-clamp-2">
                         {role.provider && role.model
-                          ? `${role.provider} / ${role.model}`
-                          : "未绑定模型，发送时跟随当前模型选择"}
+                          ? `画布绑定: ${role.provider} / ${role.model}`
+                          : "未绑定画布专属模型"}
                       </span>
                     </button>
                   ))}
@@ -414,27 +414,8 @@ export default function ChatInput({
             </button>
           </div>
         </div>
-
-        {activeRole && (
-          <div className="mt-2 px-2 pt-2 border-t border-[#343434]">
-            <div className="flex items-center justify-between gap-3 rounded-lg bg-amber-500/[0.06] border border-amber-500/15 px-3 py-2">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 text-amber-300">
-                  <UserSquare2 size={12} />
-                  <span className="text-[10px] font-semibold truncate">当前角色：{activeRole.name}</span>
-                </div>
-                <div className="text-[10px] text-gray-500 mt-0.5 truncate">
-                  {activeRole.provider && activeRole.model
-                    ? `绑定模型：${activeRole.provider} / ${activeRole.model}`
-                    : "未绑定专属模型，将沿用当前模型选择"}
-                </div>
-              </div>
-              {!canSelectRole && (
-                <span className="text-[9px] text-gray-500 shrink-0">已锁定</span>
-              )}
-            </div>
-          </div>
-        )}
+        
+        {/* 【已移除】原本在此处的 activeRole 底部金黄色提示框 */}
       </div>
     </div>
   );

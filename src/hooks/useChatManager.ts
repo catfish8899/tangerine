@@ -277,7 +277,13 @@ export function useChatManager() {
   const getRoleResolvedModelInfo = (session?: ChatSession): ResolvedModelConfig => {
     const fallbackResolved = resolveModelConfig(selectedModel);
 
-    if (!session?.roleId) {
+    // 【核心修改】：如果是普通聊天（type 为 "chat" 或未定义），则完全使用用户在聊天框选择的模型，忽略角色绑定的模型
+    if (!session || session.type !== "automation") {
+      return fallbackResolved;
+    }
+
+    // 仅自动化画布流程（type 为 "automation"）才会读取并使用角色绑定的专属模型
+    if (!session.roleId) {
       return fallbackResolved;
     }
 
@@ -950,7 +956,7 @@ export function useChatManager() {
               }
               return m;
             });
-            const cleanMsgs = updatedMessages.filter(m => m.id !== streamAiMessageId);
+                        const cleanMsgs = updatedMessages.filter(m => m.id !== streamAiMessageId);
             return { ...session, messages: [...cleanMsgs, systemError] };
           }
 

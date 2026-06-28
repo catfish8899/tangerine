@@ -1,3 +1,4 @@
+# py_sidecar/main.py
 # -*- coding: utf-8 -*-
 import os
 import sys
@@ -79,8 +80,24 @@ def process_file_paths(file_paths: List[str]) -> tuple:
       if ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.mp3', '.wav', '.ogg', '.m4a']:
           try:
               mime_type, _ = mimetypes.guess_type(path)
+              # 【修复点】：优化 MIME 类型回退逻辑，确保所有支持的图片/音频格式都能正确识别
               if not mime_type:
-                  mime_type = "image/png" if ext in ['.png', '.jpg', '.jpeg'] else "audio/mp3"
+                  if ext in ['.jpg', '.jpeg']:
+                      mime_type = "image/jpeg"
+                  elif ext == '.png':
+                      mime_type = "image/png"
+                  elif ext == '.gif':
+                      mime_type = "image/gif"
+                  elif ext == '.webp':
+                      mime_type = "image/webp"
+                  elif ext == '.bmp':
+                      mime_type = "image/bmp"
+                  elif ext == '.mp3':
+                      mime_type = "audio/mpeg"
+                  elif ext in ['.wav', '.ogg', '.m4a']:
+                      mime_type = f"audio/{ext.replace('.', '')}"
+                  else:
+                      mime_type = "application/octet-stream"
 
               with open(path, "rb") as f:
                   file_b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -238,7 +255,7 @@ def get_api_key_from_env(env_key_name: Optional[str]) -> Optional[str]:
 def sanitize_messages_for_text_only(messages: list) -> list:
     """
     某些 OpenAI 兼容后端 / 本地 Ollama 不一定支持 input_audio / image_url 混合结构，
-    因此在必要时将内容折叠为纯文本。
+    因此在必要时将内容折叠为纯文本。（注：Ollama 视觉模型已支持多模态，不再强制使用此函数）
     """
     formatted_messages = []
     for msg in messages:
@@ -265,11 +282,6 @@ async def call_llm_api_stream(
 ):
     """
     支持流式传输的通用 LLM 接口，逐步 yield SSE chunk 给前端
-
-    路由策略：
-    1. Gemini：专用 SDK；
-    2. Ollama：本地 OpenAI 兼容通路；
-    3. 其余云端第三方：统一走 OpenAI 兼容通路（支持 CherryIn / OpenRouter / 各类网关）。
     """
     await send_debug_log("LLM_CALL_PREPARED", {
         "provider": provider,
@@ -368,11 +380,12 @@ async def call_llm_api_stream(
             ollama_base = resolve_openai_like_base_url(base_url) or f"{OLLAMA_BASE_URL}"
             client = OpenAI(api_key="ollama", base_url=f"{ollama_base}/v1")
 
-            formatted_messages = sanitize_messages_for_text_only(messages)
-
+            # 【核心修复点】：移除 sanitize_messages_for_text_only。
+            # Ollama 的 OpenAI 兼容接口 (0.1.14+) 已完美支持标准 image_url 多模态格式。
+            # 强制降级为纯文本会导致视觉模型（如 llava, llama3.2-vision）丢失图片数据。
             response = client.chat.completions.create(
                 model=model,
-                messages=formatted_messages,
+                messages=messages, 
                 stream=True
             )
 
@@ -402,7 +415,7 @@ async def call_llm_api_stream(
                 "usage": usage_dict
             })
         except Exception as e:
-            error_data = json.dumps({"error": f"{provider or 'Ollama'} 本地连接或模型加载失败: {str(e)}。请确保本地已运行 `ollama run {model}` 启动。"})
+            error_data = json.dumps({"error": f"{provider or 'Ollama'} 本地连接或模型加载失败: {str(e)}。请确保本地已运行 `ollama run {model}` 启动，且该模型支持视觉能力。"})
             yield f"data: {error_data}\n\n"
 
     # ---- 通用 OpenAI 兼容第三方 API 流式逻辑 ----
@@ -423,15 +436,12 @@ async def call_llm_api_stream(
         try:
             client = OpenAI(api_key=api_key_val, base_url=final_base_url)
 
-            # 对通用第三方先保守走原始 messages。
-            # 若后续你发现某些网关不支持多模态结构，可再降级到 sanitize_messages_for_text_only。
             kwargs: Dict[str, Any] = {
                 "model": model,
                 "messages": messages,
                 "stream": True
             }
 
-            # 保留对 DeepSeek 旧模型的能力增强，但不再依赖 provider 名称硬编码
             if model == "deepseek-v4-pro":
                 kwargs["reasoning_effort"] = "high"
                 kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
@@ -490,7 +500,6 @@ async def chat(request: ChatRequest):
     base_url = normalize_text(request.base_url)
     env_key_name = normalize_text(request.env_key_name)
 
-    # 仅作为兼容兜底，不再作为主逻辑依赖
     if not provider:
         if is_gemini_provider(provider, request.model, base_url):
             provider = "Gemini"
@@ -502,8 +511,15 @@ async def chat(request: ChatRequest):
     text_context, multimodal_contents = process_file_paths(request.file_paths)
     processed_messages = []
 
+    # 【修复点】：增强健壮性，动态查找最后一个 user 消息的索引，防止因消息顺序异常导致图片丢失
+    last_user_idx = -1
+    for i in range(len(request.messages) - 1, -1, -1):
+        if request.messages[i]["role"] == "user":
+            last_user_idx = i
+            break
+
     for i, msg in enumerate(request.messages):
-        if i == len(request.messages) - 1 and msg["role"] == "user":
+        if i == last_user_idx:
             user_text = msg["content"]
             if text_context:
                 user_text = f"{text_context}\n\n请结合以上文档/代码内容，回答用户的问题：{user_text}"
