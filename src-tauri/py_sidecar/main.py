@@ -385,10 +385,12 @@ async def call_llm_api_stream(
             ollama_base = resolve_openai_like_base_url(base_url) or f"{OLLAMA_BASE_URL}"
             client = OpenAI(api_key="ollama", base_url=f"{ollama_base}/v1")
 
+            # 【核心修复 1】：强制 Ollama 在流式输出的最后返回 token 统计信息
             response = client.chat.completions.create(
                 model=model,
                 messages=messages, 
-                stream=True
+                stream=True,
+                stream_options={"include_usage": True}
             )
 
             for chunk in response:
@@ -396,15 +398,20 @@ async def call_llm_api_stream(
                 if raw_request and await raw_request.is_disconnected():
                     break
 
-                if not chunk.choices:
-                    continue
-                delta = chunk.choices[0].delta
-                text_chunk = getattr(delta, "content", "") or ""
-                full_content += text_chunk
-
+                # 提取 usage（可能在最后一个没有 choices 的 chunk 中）
                 usage_info = getattr(chunk, "usage", None)
                 if usage_info:
                     usage_dict = usage_info.model_dump() if hasattr(usage_info, "model_dump") else dict(usage_info)
+
+                # 【核心修复 2】：如果既没有 choices 也没有 usage，才跳过。防止带有 usage 的空 choices chunk 被丢弃
+                if not chunk.choices and not usage_info:
+                    continue
+
+                text_chunk = ""
+                if chunk.choices:
+                    delta = chunk.choices[0].delta
+                    text_chunk = getattr(delta, "content", "") or ""
+                    full_content += text_chunk
 
                 payload = {
                     "choices": [{"delta": {"content": text_chunk}}],
@@ -452,6 +459,8 @@ async def call_llm_api_stream(
                 kwargs["reasoning_effort"] = "high"
                 kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
 
+            # 【核心修复 3】：通用 OpenAI 兼容接口同样需要强制开启 stream_options 以获取 usage
+            kwargs["stream_options"] = {"include_usage": True}
             response = client.chat.completions.create(**kwargs)
 
             for chunk in response:
@@ -459,18 +468,22 @@ async def call_llm_api_stream(
                 if raw_request and await raw_request.is_disconnected():
                     break
 
-                if not chunk.choices:
-                    continue
-
-                delta = chunk.choices[0].delta
-                text_chunk = getattr(delta, "content", "") or ""
-                reasoning_chunk = getattr(delta, "reasoning_content", None)
-
-                full_content += text_chunk
-
+                # 提取 usage
                 usage_info = getattr(chunk, "usage", None)
                 if usage_info:
                     usage_dict = usage_info.model_dump() if hasattr(usage_info, "model_dump") else dict(usage_info)
+
+                # 【核心修复 4】：防止带有 usage 的空 choices chunk 被丢弃
+                if not chunk.choices and not usage_info:
+                    continue
+
+                text_chunk = ""
+                reasoning_chunk = None
+                if chunk.choices:
+                    delta = chunk.choices[0].delta
+                    text_chunk = getattr(delta, "content", "") or ""
+                    reasoning_chunk = getattr(delta, "reasoning_content", None)
+                    full_content += text_chunk
 
                 payload = {
                     "choices": [{"delta": {"content": text_chunk, "reasoning_content": reasoning_chunk}}],
