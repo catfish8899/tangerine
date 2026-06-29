@@ -11,7 +11,6 @@ import { useChatManager } from "./hooks/useChatManager";
 const AUTOMATION_FLOW_STORAGE_PREFIX = "tangerine_automation_flow_";
 
 export default function App() {
-  // 通过自定义 Hook 引入所有的视图状态和方法
   const { state, actions, refs } = useChatManager();
   const {
     sessions, activeSessionId, activeSession, showSettings, showRoles,
@@ -59,8 +58,6 @@ export default function App() {
             if (tid) {
               const targetSession = sessions.find((s: any) => s.id === tid);
 
-              // 自动化流程画布与普通对话是两套业务逻辑。
-              // 删除自动化会话时，同步清理该会话独立的画布持久化数据，避免遗留脏数据。
               if (targetSession?.type === "automation") {
                 localStorage.removeItem(`${AUTOMATION_FLOW_STORAGE_PREFIX}${tid}`);
               }
@@ -97,10 +94,13 @@ export default function App() {
               className="flex items-center gap-2.5 w-full text-left px-2.5 py-1.5 hover:bg-[#ffffff]/10 rounded transition-colors font-medium mb-1"
               onClick={() => {
                 const mid = msgContextMenu.targetMessageId;
-                actions.setSessions((prev: any) => prev.map((s: any) => {
-                  if (s.id === activeSessionId) return { ...s, messages: s.messages.map((m: any) => m.id === mid ? { ...m, isEditing: true } : m) };
-                  return s;
-                }));
+                // 增加非空判断，修复 TS 类型报错
+                if (mid) {
+                  actions.setSessions((prev: any) => prev.map((s: any) => {
+                    if (s.id === activeSessionId) return { ...s, messages: s.messages.map((m: any) => m.id === mid ? { ...m, isEditing: true } : m) };
+                    return s;
+                  }));
+                }
                 actions.setMsgContextMenu((prev: any) => ({ ...prev, visible: false }));
               }}
             >
@@ -113,7 +113,11 @@ export default function App() {
             <button
               className="flex items-center gap-2.5 w-full text-left px-2.5 py-1.5 hover:bg-[#ffffff]/10 rounded transition-colors font-medium mb-1"
               onClick={() => {
-                actions.handleResendMessage(msgContextMenu.targetMessageId || "");
+                const mid = msgContextMenu.targetMessageId;
+                // 增加非空判断，修复 TS 类型报错
+                if (mid) {
+                  actions.handleResendMessage(mid);
+                }
                 actions.setMsgContextMenu((prev: any) => ({ ...prev, visible: false }));
               }}
             >
@@ -126,10 +130,11 @@ export default function App() {
             className="flex items-center gap-2.5 w-full text-left px-2.5 py-1.5 hover:bg-[#ff4d4d]/15 hover:text-red-200 rounded transition-colors font-medium text-red-300"
             onClick={() => {
               const mid = msgContextMenu.targetMessageId;
-              actions.setSessions((prev: any) => prev.map((s: any) => {
-                if (s.id === activeSessionId) return { ...s, messages: s.messages.filter((m: any) => m.id !== mid) };
-                return s;
-              }));
+              // 增加非空判断，修复 TS 类型报错
+              if (mid) {
+                // 【核心修复】：调用深度删除方法，清理 branches 中的残留，防止消息复活
+                actions.handleDeleteMessage(mid);
+              }
               actions.setMsgContextMenu((prev: any) => ({ ...prev, visible: false }));
             }}
           >

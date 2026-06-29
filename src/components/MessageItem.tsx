@@ -13,7 +13,8 @@ import {
   ChevronUp,
   Search,
   CheckCircle2,
-  ExternalLink
+  ExternalLink,
+  StopCircle // 新增：停止图标
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-shell";
 import { Message, getFileType, format12HourTime } from "../types/chat";
@@ -76,11 +77,16 @@ export default function MessageItem({
   const hasText = !!msg.text?.trim();
   const hasSources = !!(msg.sources && msg.sources.length > 0);
 
-  const isCurrentlyThinking = isAi && !hasText && !hasSources && isParentLoading;
-  const isMessageTrulyEmpty = isAi && !hasText && !hasSources && !isParentLoading;
+  // 【修改点】：如果消息已被手动停止，则不应再显示“正在处理”动画
+  const isCurrentlyThinking = isAi && !hasText && !hasSources && !msg.isStopped && isParentLoading;
+  
+  // 【修改点】：如果消息被手动停止，即使没有文本也不应被隐藏
+  const isMessageTrulyEmpty = isAi && !hasText && !hasSources && !isParentLoading && !msg.isStopped;
+  
   const shouldShowMarkdown = isAi && hasText;
 
-  const shouldShowMetadata = isAi && !msg.isEditing && hasText;
+  // 【修改点】：只要有文本或者被手动停止了，就显示底部元数据区域
+  const shouldShowMetadata = isAi && !msg.isEditing && (hasText || msg.isStopped);
 
   if (isMessageTrulyEmpty) {
     return null;
@@ -244,14 +250,29 @@ export default function MessageItem({
           </div>
         )}
 
+        {/* 【修改点】：底部元数据区域，支持渲染“已手动停止”标识 */}
         {shouldShowMetadata && (
           <div className="mt-1 pt-1.5 border-t border-white/5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-gray-500 font-mono select-none animate-in fade-in duration-500">
-            <span>提供商: <strong className="text-gray-400 font-medium">{msg.provider || "未知"}</strong></span>
-            <span className="opacity-30 text-[8px]">•</span>
-            <span>模型: <strong className="text-gray-400 font-medium">{msg.model || "未知"}</strong></span>
-            <span className="opacity-30 text-[8px]">•</span>
-            <span>Token消耗: <strong className="text-gray-400 font-medium">{msg.tokensUsed !== undefined ? msg.tokensUsed : "未知"}</strong></span>
-            <span className="opacity-30 text-[8px]">•</span>
+            {msg.isStopped && (
+              <>
+                <span className="text-red-400 flex items-center gap-1 font-semibold">
+                  <StopCircle size={11} /> 已手动停止
+                </span>
+                {hasText && <span className="opacity-30 text-[8px]">•</span>}
+              </>
+            )}
+            
+            {hasText && (
+              <>
+                <span>提供商: <strong className="text-gray-400 font-medium">{msg.provider || "未知"}</strong></span>
+                <span className="opacity-30 text-[8px]">•</span>
+                <span>模型: <strong className="text-gray-400 font-medium">{msg.model || "未知"}</strong></span>
+                <span className="opacity-30 text-[8px]">•</span>
+                <span>Token消耗: <strong className="text-gray-400 font-medium">{msg.tokensUsed !== undefined ? msg.tokensUsed : "未知"}</strong></span>
+                <span className="opacity-30 text-[8px]">•</span>
+              </>
+            )}
+            
             <span>时间: <strong className="text-gray-400 font-medium">{format12HourTime(msg.timestamp)}</strong></span>
           </div>
         )}

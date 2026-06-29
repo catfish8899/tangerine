@@ -21,10 +21,11 @@
 tangerine/
 ├── src/
 │   ├── components/
-│   │   ├── CodeBlock.tsx               # Markdown 代码块渲染与复制
-│   │   ├── MarkdownMessage.tsx         # Markdown 渲染层
-│   │   ├── MessageItem.tsx             # 单条消息气泡；含 AI/用户/system_err、来源抽屉、元数据展示
-│   │   ├── ChatInput.tsx               # 输入区；文本、附件、图片预览、模型选择、发送
+│   │   ├── CodeBlock.tsx               # Markdown 代码块渲染与一键复制
+│   │   ├── MarkdownMessage.tsx         # Markdown 渲染层封装
+│   │   ├── MessageItem.tsx             # 单条消息气泡；含 AI/用户/报错展示、网络来源抽屉、元数据、手动停止标识(isStopped)
+│   │   ├── ChatInput.tsx               # 输入区；文本、附件、图片预览、模型选择、发送/停止生成按钮动态切换
+│   │   ├── ChatWorkspace.tsx           # 聊天主工作区；消息列表渲染、拖拽上传遮罩、预览弹窗、向下传递停止生成事件
 │   │   ├── Sidebar.tsx                 # 左侧会话栏；普通聊天/自动化流程切换与删除
 │   │   ├── SettingsModal.tsx           # 设置面板；模型提供商、模型配置、Ollama 同步、显示设置
 │   │   ├── RolesModal.tsx              # 角色管理弹窗；角色增删改查、绑定模型、保存交互
@@ -40,10 +41,10 @@ tangerine/
 │   │       ├── SystemTimeBadge.tsx     # 系统时间徽标
 │   │       └── FlowEditor.tsx          # 主画布编辑器；节点、边、快捷键、复制粘贴、撤销重做
 │   ├── hooks/
-│   │   └── useChatManager.ts           # 聊天核心状态管理；会话、流式响应、附件、图片预览、拖放、发送
+│   │   └── useChatManager.ts           # 聊天核心状态管理；会话、流式响应(AbortController中断)、分支切换与保存、深度删除防复活、附件与拖放
 │   ├── types/
-│   │   └── chat.ts                     # 聊天域类型定义；含 Message / ChatSession / Role / AttachmentFile
-│   └── App.tsx                         # 应用主入口；聊天页/自动化页主视图分流
+│   │   └── chat.ts                     # 聊天域类型定义；含 Message(含isStopped/branches) / ChatSession / Role / AttachmentFile
+│   └── App.tsx                         # 应用主入口；聊天页/自动化页主视图分流、全局右键菜单(调用深度删除/重发/编辑)
 └── src-tauri/
     ├── capabilities/
     │   └── default.json                # Tauri capability 配置
@@ -52,7 +53,7 @@ tangerine/
     ├── Cargo.toml                      # Rust 依赖清单
     ├── tauri.conf.json                 # Tauri 配置
     └── py_sidecar/
-        ├── main.py                     # FastAPI 服务；/chat、SSE、模型适配
+        ├── main.py                     # FastAPI 服务；/chat SSE流式输出、客户端断开检测(Request.is_disconnected)以切断算力、多模型适配
         ├── debugger.py                 # 调试面板
         └── requirements.txt            # Python 依赖
-
+```

@@ -46,7 +46,8 @@ export default function ChatWorkspace({ state, actions, refs }: ChatWorkspacePro
     setShowModelDropdown,
     setWebSearchMode,
     handleSendMessage,
-    setShowRoleDropdown
+    setShowRoleDropdown,
+    handleStopGeneration // 新增：解构停止生成方法
   } = actions;
 
   const { messagesEndRef } = refs;
@@ -158,6 +159,7 @@ export default function ChatWorkspace({ state, actions, refs }: ChatWorkspacePro
         webSearchMode={webSearchMode}
         setWebSearchMode={setWebSearchMode}
         onSendMessage={handleSendMessage}
+        onStopGeneration={handleStopGeneration} // 新增：传递停止生成方法
         roles={roles}
         activeRole={activeRole}
         activeRoleId={activeSession?.roleId}

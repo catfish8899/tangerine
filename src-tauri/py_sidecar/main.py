@@ -9,7 +9,7 @@ import mimetypes
 import re
 import json
 import asyncio
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -278,7 +278,8 @@ async def call_llm_api_stream(
     provider: str,
     search_sources: list,
     base_url: Optional[str] = None,
-    env_key_name: Optional[str] = None
+    env_key_name: Optional[str] = None,
+    raw_request: Optional[Request] = None
 ):
     """
     支持流式传输的通用 LLM 接口，逐步 yield SSE chunk 给前端
@@ -299,8 +300,8 @@ async def call_llm_api_stream(
         api_key_val = get_api_key_from_env(env_key_name) or os.environ.get('GEMINI_API_KEY')
         if not api_key_val:
             env_name = normalize_text(env_key_name) or "GEMINI_API_KEY"
-            error_data = json.dumps({"error": f"本地未检测到环境变量 {env_name}，请检查系统设置！"})
-            yield f"data: {error_data}\n\n"
+            err_msg = f"本地未检测到环境变量 {env_name}，请检查系统设置！"
+            yield f"data: {json.dumps({'error': err_msg})}\n\n"
             return
 
         try:
@@ -345,6 +346,10 @@ async def call_llm_api_stream(
             )
 
             for chunk in response_stream:
+                # 检测客户端是否断开
+                if raw_request and await raw_request.is_disconnected():
+                    break
+
                 text_chunk = chunk.text or ""
                 full_content += text_chunk
 
@@ -371,8 +376,8 @@ async def call_llm_api_stream(
             })
 
         except Exception as e:
-            error_data = json.dumps({"error": f"{provider or 'Gemini'} 云端推理流式失败: {str(e)}"})
-            yield f"data: {error_data}\n\n"
+            err_msg = f"{provider or 'Gemini'} 云端推理流式失败: {str(e)}"
+            yield f"data: {json.dumps({'error': err_msg})}\n\n"
 
     # ---- Ollama 本地流式逻辑 ----
     elif is_ollama_provider(provider, base_url):
@@ -380,9 +385,6 @@ async def call_llm_api_stream(
             ollama_base = resolve_openai_like_base_url(base_url) or f"{OLLAMA_BASE_URL}"
             client = OpenAI(api_key="ollama", base_url=f"{ollama_base}/v1")
 
-            # 【核心修复点】：移除 sanitize_messages_for_text_only。
-            # Ollama 的 OpenAI 兼容接口 (0.1.14+) 已完美支持标准 image_url 多模态格式。
-            # 强制降级为纯文本会导致视觉模型（如 llava, llama3.2-vision）丢失图片数据。
             response = client.chat.completions.create(
                 model=model,
                 messages=messages, 
@@ -390,6 +392,10 @@ async def call_llm_api_stream(
             )
 
             for chunk in response:
+                # 检测客户端是否断开，若断开则立即停止 Ollama 推理
+                if raw_request and await raw_request.is_disconnected():
+                    break
+
                 if not chunk.choices:
                     continue
                 delta = chunk.choices[0].delta
@@ -415,22 +421,22 @@ async def call_llm_api_stream(
                 "usage": usage_dict
             })
         except Exception as e:
-            error_data = json.dumps({"error": f"{provider or 'Ollama'} 本地连接或模型加载失败: {str(e)}。请确保本地已运行 `ollama run {model}` 启动，且该模型支持视觉能力。"})
-            yield f"data: {error_data}\n\n"
+            err_msg = f"{provider or 'Ollama'} 本地连接或模型加载失败: {str(e)}。请确保本地已运行 `ollama run {model}` 启动，且该模型支持视觉能力。"
+            yield f"data: {json.dumps({'error': err_msg})}\n\n"
 
     # ---- 通用 OpenAI 兼容第三方 API 流式逻辑 ----
     else:
         api_key_val = get_api_key_from_env(env_key_name)
         if not api_key_val:
             env_name = normalize_text(env_key_name) or "未提供环境变量名"
-            error_data = json.dumps({"error": f"本地未检测到环境变量 {env_name}，请检查系统设置！"})
-            yield f"data: {error_data}\n\n"
+            err_msg = f"本地未检测到环境变量 {env_name}，请检查系统设置！"
+            yield f"data: {json.dumps({'error': err_msg})}\n\n"
             return
 
         final_base_url = resolve_openai_like_base_url(base_url)
         if not final_base_url:
-            error_data = json.dumps({"error": "当前第三方提供商未配置有效 Base URL，请在设置页补充。"})
-            yield f"data: {error_data}\n\n"
+            err_msg = "当前第三方提供商未配置有效 Base URL，请在设置页补充。"
+            yield f"data: {json.dumps({'error': err_msg})}\n\n"
             return
 
         try:
@@ -449,6 +455,10 @@ async def call_llm_api_stream(
             response = client.chat.completions.create(**kwargs)
 
             for chunk in response:
+                # 检测客户端是否断开，若断开则立即停止云端推理
+                if raw_request and await raw_request.is_disconnected():
+                    break
+
                 if not chunk.choices:
                     continue
 
@@ -478,14 +488,14 @@ async def call_llm_api_stream(
                 "usage": usage_dict
             })
         except Exception as e:
-            error_data = json.dumps({"error": f"{provider or '第三方 OpenAI 兼容接口'} 推理流式失败: {str(e)}"})
-            yield f"data: {error_data}\n\n"
+            err_msg = f"{provider or '第三方 OpenAI 兼容接口'} 推理流式失败: {str(e)}"
+            yield f"data: {json.dumps({'error': err_msg})}\n\n"
 
 
 # ================= 🚀 核心对话推理路由 =================
 
 @app.post("/chat")
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, raw_request: Request):
     # 广播 incoming 请求给 debugger.py
     await send_debug_log("REQUEST_INCOMING", {
         "provider": request.provider,
@@ -629,8 +639,12 @@ async def chat(request: ChatRequest):
                             m_provider,
                             [],
                             m_base_url,
-                            m_env_key_name
+                            m_env_key_name,
+                            raw_request
                         ):
+                            # 若客户端断开，直接中断 Agent 内部同步调用
+                            if raw_request and await raw_request.is_disconnected():
+                                break
                             if chunk_str.startswith("data: "):
                                 try:
                                     js = json.loads(chunk_str[6:])
@@ -643,6 +657,10 @@ async def chat(request: ChatRequest):
                         return full_txt, final_usage
 
                     for agent_round in range(1, max_agent_rounds + 1):
+                        # 每一轮 Agent 思考前检测是否已断开
+                        if raw_request and await raw_request.is_disconnected():
+                            break
+
                         ai_choice, current_usage = await call_llm_api_sync(
                             request.model,
                             agent_context,
@@ -684,6 +702,8 @@ async def chat(request: ChatRequest):
                         else:
                             async def stream_saved_response():
                                 for i in range(0, len(ai_choice), 4):
+                                    if raw_request and await raw_request.is_disconnected():
+                                        break
                                     chunk = ai_choice[i:i+4]
                                     payload = {
                                         "choices": [{"delta": {"content": chunk}}],
@@ -702,7 +722,8 @@ async def chat(request: ChatRequest):
                             provider,
                             search_sources,
                             base_url,
-                            env_key_name
+                            env_key_name,
+                            raw_request
                         ),
                         media_type="text/event-stream"
                     )
@@ -723,7 +744,8 @@ async def chat(request: ChatRequest):
                 provider,
                 search_sources,
                 base_url,
-                env_key_name
+                env_key_name,
+                raw_request
             ),
             media_type="text/event-stream"
         )

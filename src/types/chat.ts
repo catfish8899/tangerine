@@ -8,6 +8,7 @@ export interface Message {
   tokensUsed?: number;
   timestamp?: number;
   filePaths?: string[]; // 记录本次消息关联的文件绝对路径列表
+  isStopped?: boolean; // 新增：标记该消息是否被手动停止生成
 
   // 编辑和分支管理字段
   isEditing?: boolean;

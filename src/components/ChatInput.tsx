@@ -1,6 +1,7 @@
 import React from "react";
 import {
   Send,
+  Square,
   ChevronUp,
   Paperclip,
   X,
@@ -38,6 +39,7 @@ interface ChatInputProps {
   onRemoveAttachment: (idx: number) => void;
   onPreviewImage: (file: AttachmentFile) => void;
   onSendMessage: () => void;
+  onStopGeneration: () => void; // 新增：停止生成回调
   webSearchMode: "off" | "agent";
   setWebSearchMode: (mode: "off" | "agent") => void;
 
@@ -66,6 +68,7 @@ export default function ChatInput({
   onRemoveAttachment,
   onPreviewImage,
   onSendMessage,
+  onStopGeneration,
   webSearchMode,
   setWebSearchMode,
   roles,
@@ -222,14 +225,14 @@ export default function ChatInput({
 
         <textarea
           rows={2}
-          placeholder={isLoading ? "请等待当前回复完成..." : "在此处输入聊天内容，点击别针或拖拽文件到聊天区域..."}
+          placeholder={isLoading ? "AI 正在思考中... (可点击右侧按钮停止)" : "在此处输入聊天内容，点击别针或拖拽文件到聊天区域..."}
           disabled={isLoading}
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
-              onSendMessage();
+              if (!isLoading) onSendMessage();
             }
           }}
           className="w-full bg-transparent border-none outline-none resize-none text-xs text-[#e3e3e3] placeholder-gray-500 px-2 leading-relaxed"
@@ -400,22 +403,32 @@ export default function ChatInput({
               )}
             </div>
 
-            <button
-              type="button"
-              onClick={onSendMessage}
-              disabled={(!inputText.trim() && attachments.length === 0) || isLoading}
-              className={`w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer ${
-                (inputText.trim() || attachments.length > 0) && !isLoading
-                  ? "bg-white text-black hover:bg-gray-200 shadow-sm"
-                  : "bg-[#3e3e3e] text-gray-500 cursor-not-allowed"
-              }`}
-            >
-              <Send size={12} />
-            </button>
+            {/* 发送 / 停止 按钮动态切换 */}
+            {isLoading ? (
+              <button
+                type="button"
+                onClick={onStopGeneration}
+                className="w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer bg-red-500 text-white hover:bg-red-600 shadow-sm animate-in fade-in zoom-in-95 duration-150"
+                title="停止生成"
+              >
+                <Square size={12} fill="currentColor" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onSendMessage}
+                disabled={!inputText.trim() && attachments.length === 0}
+                className={`w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer ${
+                  inputText.trim() || attachments.length > 0
+                    ? "bg-white text-black hover:bg-gray-200 shadow-sm"
+                    : "bg-[#3e3e3e] text-gray-500 cursor-not-allowed"
+                }`}
+              >
+                <Send size={12} />
+              </button>
+            )}
           </div>
         </div>
-        
-        {/* 【已移除】原本在此处的 activeRole 底部金黄色提示框 */}
       </div>
     </div>
   );

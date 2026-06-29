@@ -48,12 +48,8 @@ export function useChatManager() {
   const [isLoading, setIsLoading] = useState(false);
   const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
 
-  // 默认模型不再固定绑定 deepseek，优先在同步配置时自动矫正
   const [selectedModel, setSelectedModel] = useState<string>("");
-
-  // 兼容现有 ChatInput 逻辑，仍输出字符串数组
   const [availableModels, setAvailableModels] = useState<string[]>([]);
-  // 新增：给模型下拉展示 provider / category / baseUrl 等信息
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
 
   const [showModelDropdown, setShowModelDropdown] = useState(false);
@@ -64,7 +60,6 @@ export function useChatManager() {
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
 
-  // 仅保留关闭 / Tavily 网络搜索 两种模式
   const [webSearchMode, setWebSearchMode] = useState<"off" | "agent">("off");
 
   const [roles, setRoles] = useState<Role[]>(() => {
@@ -104,6 +99,7 @@ export function useChatManager() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const prevMessagesCountRef = useRef<number>(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
@@ -184,7 +180,6 @@ export function useChatManager() {
     }
   };
 
-  // 仅归类为 ollama模型 / 云端模型，不再做 deepseek / gemini / 其他 的硬编码归属
   const getModelCategoryFromConfig = (config?: ApiProviderConfig): "ollama" | "cloud" => {
     if (!config) return "cloud";
     const providerLower = config.providerName.trim().toLowerCase();
@@ -277,12 +272,10 @@ export function useChatManager() {
   const getRoleResolvedModelInfo = (session?: ChatSession): ResolvedModelConfig => {
     const fallbackResolved = resolveModelConfig(selectedModel);
 
-    // 【核心修改】：如果是普通聊天（type 为 "chat" 或未定义），则完全使用用户在聊天框选择的模型，忽略角色绑定的模型
     if (!session || session.type !== "automation") {
       return fallbackResolved;
     }
 
-    // 仅自动化画布流程（type 为 "automation"）才会读取并使用角色绑定的专属模型
     if (!session.roleId) {
       return fallbackResolved;
     }
@@ -295,7 +288,6 @@ export function useChatManager() {
     return fallbackResolved;
   };
 
-  // 通过 Rust 命令直接读取图片并返回 data URL
   const createImagePreview = async (path: string, name: string): Promise<{ previewUrl?: string; previewError?: string }> => {
     try {
       const previewUrl = await invoke<string>("read_image_as_data_url", { path });
@@ -309,7 +301,6 @@ export function useChatManager() {
     }
   };
 
-  // 根据本地绝对路径构建附件对象
   const buildAttachmentFromPath = async (path: string): Promise<AttachmentFile> => {
     const parts = path.split(/[\\/]/);
     const name = parts[parts.length - 1] || "未命名文件";
@@ -530,6 +521,29 @@ export function useChatManager() {
     }));
   };
 
+  // 【新增修复】：深度删除消息，防止在 branches 中残留导致“复活”
+  const handleDeleteMessage = (messageId: string) => {
+    setSessions(prev => prev.map(session => {
+      if (session.id !== activeSessionId) return session;
+
+      // 辅助函数：从消息数组中移除指定 ID 的消息
+      const filterMsgs = (msgs: Message[]) => msgs.filter(m => m.id !== messageId);
+
+      // 1. 从主 messages 数组中删除
+      let newMessages = filterMsgs(session.messages);
+
+      // 2. 深度遍历所有消息的 branches，删除其中的目标消息
+      newMessages = newMessages.map(m => {
+        if (!m.branches || m.branches.length === 0) return m;
+        
+        const newBranches = m.branches.map(branch => filterMsgs(branch));
+        return { ...m, branches: newBranches };
+      });
+
+      return { ...session, messages: newMessages };
+    }));
+  };
+
   const handleSelectFiles = async () => {
     try {
       const selected = await open({
@@ -606,6 +620,7 @@ export function useChatManager() {
     }));
   };
 
+  // 【核心修复】：切换分支前，保存当前分支的数据，防止新消息丢失和状态错乱
   const handleSwitchBranch = (messageId: string, direction: "prev" | "next") => {
     setSessions(prev => prev.map(session => {
       if (session.id !== activeSessionId) return session;
@@ -614,7 +629,7 @@ export function useChatManager() {
       if (idx === -1) return session;
 
       const targetMsg = { ...session.messages[idx] };
-      const branches = targetMsg.branches || [];
+      let branches = targetMsg.branches ? [...targetMsg.branches] : [];
       const currentIdx = targetMsg.activeBranchIndex ?? 0;
 
       let newIdx = currentIdx;
@@ -626,13 +641,21 @@ export function useChatManager() {
 
       if (newIdx === currentIdx) return session;
 
+      // 【关键修复】：在切换前，将当前视图中属于当前分支的后续消息保存回 branches[currentIdx]
+      const currentBranchMessages = session.messages.slice(idx + 1);
+      if (branches.length > currentIdx) {
+        branches[currentIdx] = currentBranchMessages;
+      }
+
       targetMsg.activeBranchIndex = newIdx;
+      targetMsg.branches = branches;
+
       const baseMessages = session.messages.slice(0, idx);
-      const branchMessages = branches[newIdx] || [];
+      const newBranchMessages = branches[newIdx] || [];
 
       return {
         ...session,
-        messages: [...baseMessages, targetMsg, ...branchMessages]
+        messages: [...baseMessages, targetMsg, ...newBranchMessages]
       };
     }));
   };
@@ -793,6 +816,13 @@ export function useChatManager() {
     );
   };
 
+  const handleStopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+  };
+
   const executeStreamChat = async (
     messageContext: Message[],
     filePathsToSend: string[],
@@ -801,6 +831,9 @@ export function useChatManager() {
     branchParentId?: string,
     sessionSnapshot?: ChatSession
   ) => {
+    abortControllerRef.current = new AbortController();
+    const signal = abortControllerRef.current.signal;
+
     try {
       const apiMessages = messageContext
         .filter(m => m.sender !== "system_err")
@@ -822,7 +855,8 @@ export function useChatManager() {
           messages: [{ role: "system", content: finalSystemPrompt }, ...apiMessages],
           file_paths: filePathsToSend,
           web_search: webSearchMode
-        })
+        }),
+        signal
       });
 
       if (!response.ok) {
@@ -937,6 +971,36 @@ export function useChatManager() {
         }
       }
     } catch (error: any) {
+      // 判断是否为手动中断
+      if (error.name === 'AbortError' || error.message?.includes('aborted')) {
+        setSessions(prev => prev.map(session => {
+          if (session.id === activeSessionId) {
+            const updatedMessages = session.messages.map(m => {
+              if (m.id === streamAiMessageId) {
+                return { ...m, isStopped: true } as any;
+              }
+              if (branchParentId && m.id === branchParentId) {
+                const updatedBranches = m.branches ? [...m.branches] : [];
+                const activeIdx = m.activeBranchIndex ?? 0;
+                const branchList = updatedBranches[activeIdx] || [];
+                const updatedBranchList = branchList.map(bm => {
+                  if (bm.id === streamAiMessageId) {
+                    return { ...bm, isStopped: true } as any;
+                  }
+                  return bm;
+                });
+                updatedBranches[activeIdx] = updatedBranchList;
+                return { ...m, branches: updatedBranches };
+              }
+              return m;
+            });
+            return { ...session, messages: updatedMessages };
+          }
+          return session;
+        }));
+        return; // 不抛出系统错误
+      }
+
       const systemError: Message = {
         id: (Date.now() + 1).toString(),
         sender: "system_err",
@@ -956,7 +1020,7 @@ export function useChatManager() {
               }
               return m;
             });
-                        const cleanMsgs = updatedMessages.filter(m => m.id !== streamAiMessageId);
+            const cleanMsgs = updatedMessages.filter(m => m.id !== streamAiMessageId);
             return { ...session, messages: [...cleanMsgs, systemError] };
           }
 
@@ -967,6 +1031,7 @@ export function useChatManager() {
       }));
     } finally {
       setIsLoading(false);
+      abortControllerRef.current = null;
     }
   };
 
@@ -1017,6 +1082,7 @@ export function useChatManager() {
       handleMsgContextMenu,
       handleSaveEdit,
       handleCancelEdit,
+      handleDeleteMessage, // 新增：导出深度删除消息方法
       handleSelectFiles,
       handleDropFiles,
       handleRemoveAttachment,
@@ -1026,6 +1092,7 @@ export function useChatManager() {
       handleSwitchBranch,
       handleResendMessage,
       handleSendMessage,
+      handleStopGeneration,
       getModelOptionByName
     }
   };
