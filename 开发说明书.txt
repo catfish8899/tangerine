@@ -1,35 +1,31 @@
-### tangerine 桌面 agent框架 - 开发说明书
-
-#### 一、技术栈与核心依赖
-- **桌面壳层**：Tauri 2（Rust）
-- **前端**：React 18 + TypeScript + Vite 6 + Tailwind CSS v4
-- **工作流画布**：`@xyflow/react`
-- **Markdown 渲染**：
-  - `react-markdown`
-  - `remark-gfm`
-  - `rehype-highlight`
-  - `highlight.js`
-- **Tauri 插件**：
-  - `@tauri-apps/plugin-shell`
-  - `@tauri-apps/plugin-dialog`
-  - `@tauri-apps/plugin-fs`
-- **Python Sidecar**：FastAPI
-- **Rust 图片处理**：`base64`
-
-#### 二、项目目录结构
-```text
-tangerine/
-├── src/
-│   ├── components/
-│   │   ├── CodeBlock.tsx               # Markdown 代码块渲染与一键复制
-│   │   ├── MarkdownMessage.tsx         # Markdown 渲染层封装
-│   │   ├── MessageItem.tsx             # 单条消息气泡；含 AI/用户/报错展示、网络来源抽屉、元数据、手动停止标识(isStopped)
-│   │   ├── ChatInput.tsx               # 输入区；文本、附件、图片预览、模型选择、发送/停止生成按钮动态切换
-│   │   ├── ChatWorkspace.tsx           # 聊天主工作区；消息列表渲染、拖拽上传遮罩、预览弹窗、向下传递停止生成事件
-│   │   ├── Sidebar.tsx                 # 左侧会话栏；普通聊天/自动化流程切换与删除
-│   │   ├── SettingsModal.tsx           # 设置面板；模型提供商、模型配置、Ollama 同步、显示设置
-│   │   ├── RolesModal.tsx              # 角色管理弹窗；角色增删改查、绑定模型、保存交互
-│   │   ├── AutomationWorkspace.tsx     # 自动化画布入口
+tangerine 桌面 agent框架 - 开发说明书
+一、技术栈与核心依赖
+桌面壳层：Tauri 2（Rust）
+前端：React 18 + TypeScript + Vite 6 + Tailwind CSS v4
+工作流画布：@xyflow/react
+Markdown 渲染：
+react-markdown
+remark-gfm
+rehype-highlight
+highlight.js
+Tauri 插件：
+@tauri-apps/plugin-shell
+@tauri-apps/plugin-dialog
+@tauri-apps/plugin-fs
+Python Sidecar：FastAPI
+Rust 图片处理：base64
+二、项目目录结构
+Text
+│   │   ├── settings/                   # 设置面板解耦子模块
+│   │   │   ├── types.ts                # 设置面板相关的类型定义 (ApiProviderConfig 等)
+│   │   │   ├── constants.ts            # 设置面板相关的常量、Storage Key 与默认配置
+│   │   │   ├── useSettingsManager.ts   # 设置面板核心状态管理与业务逻辑 Hook
+│   │   │   ├── SettingsSidebar.tsx     # 设置面板左侧导航栏
+│   │   │   ├── SettingsHeader.tsx      # 设置面板顶部标题与关闭按钮
+│   │   │   ├── ApiProviderCard.tsx     # 单个 API 提供商配置卡片（复用于云端和 Ollama）
+│   │   │   ├── CloudModelsTab.tsx      # 云端模型设置 Tab 内容
+│   │   │   ├── OllamaModelsTab.tsx     # Ollama 模型设置 Tab 内容
+│   │   │   └── FormatSettingsTab.tsx   # 对话格式设置 Tab 内容
 │   │   └── automation/
 │   │       ├── automationConstants.ts  # 画布常量
 │   │       ├── automationTypes.ts      # 画布类型定义
@@ -56,4 +52,3 @@ tangerine/
         ├── main.py                     # FastAPI 服务；/chat SSE流式输出、客户端断开检测(Request.is_disconnected)以切断算力、多模型适配
         ├── debugger.py                 # 调试面板
         └── requirements.txt            # Python 依赖
-```
