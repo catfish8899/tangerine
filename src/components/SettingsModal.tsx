@@ -1,698 +1,88 @@
 // src/components/SettingsModal.tsx
-import { useState, useEffect } from "react";
-import {
-  X,
-  Save,
-  Plus,
-  Trash2,
-  ChevronDown,
-  ChevronUp,
-  Cpu,
-  Settings as SettingsIcon,
-  Check,
-  Type,
-  RefreshCw
-} from "lucide-react";
+// 设置面板主入口，负责组件组装与弹窗显隐控制
 
-export interface ApiProviderConfig {
-  id: string;
-  providerName: string;
-  baseUrl: string;
-  envKeyName: string;
-  models: string[];
-}
-
-interface SettingsModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-}
-
-const SETTINGS_STORAGE_KEY = "tangerine_api_settings";
-const FONT_SIZE_STORAGE_KEY = "tangerine_font_size";
-
-/**
- * 默认配置说明：
- * 1. 保留现有 DeepSeek / Gemini / Ollama 默认入口；
- * 2. 后续业务逻辑不再依赖提供商名称硬编码判断能力；
- * 3. 真正调用时以 baseUrl / envKeyName / providerName 综合决定；
- * 4. 用户可自行将 providerName 改成任意名称，系统会按用户填写名称展示。
- */
-const DEFAULT_CONFIGS: ApiProviderConfig[] = [
-  {
-    id: "deepseek-default",
-    providerName: "DeepSeek",
-    baseUrl: "https://api.deepseek.com",
-    envKeyName: "DEEPSEEK_API_KEY",
-    models: ["deepseek-v4-flash", "deepseek-v4-pro"],
-  },
-  {
-    id: "gemini-default",
-    providerName: "Gemini",
-    baseUrl: "https://generativelanguage.googleapis.com",
-    envKeyName: "GEMINI_API_KEY",
-    models: ["gemini-2.5-flash"],
-  }
-];
-
-const PRESET_FONT_SIZES = [
-  { label: "12px (默认)", value: "12px" },
-  { label: "13px", value: "13px" },
-  { label: "14px", value: "14px" },
-  { label: "15px", value: "15px" },
-  { label: "16px", value: "16px" },
-  { label: "18px", value: "18px" },
-];
+import { SettingsModalProps } from "./settings/types";
+import { useSettingsManager } from "./settings/useSettingsManager";
+import SettingsSidebar from "./settings/SettingsSidebar";
+import SettingsHeader from "./settings/SettingsHeader";
+import CloudModelsTab from "./settings/CloudModelsTab";
+import OllamaModelsTab from "./settings/OllamaModelsTab";
+import FormatSettingsTab from "./settings/FormatSettingsTab";
 
 export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
-  const [activeTab, setActiveTab] = useState<"api" | "local" | "format">("api");
-  const [configs, setConfigs] = useState<ApiProviderConfig[]>([]);
-  const [savedStatus, setSavedStatus] = useState<{ [key: string]: boolean }>({});
-  const [collapsedModels, setCollapsedModels] = useState<{ [key: string]: boolean }>({});
-
-  const [ollamaStatus, setOllamaStatus] = useState<"unknown" | "online" | "offline" | "checking">("unknown");
-  const [ollamaStatusMsg, setOllamaStatusMsg] = useState<string>("尚未检测");
-  const [localModels, setLocalModels] = useState<string[]>([]);
-  const [isSyncing, setIsSyncing] = useState<boolean>(false);
-
-  const [fontSize, setFontSize] = useState<string>("12px");
-  const [fontSizeSaved, setFontSizeSaved] = useState(false);
-
-  useEffect(() => {
-    const savedConfigs = localStorage.getItem(SETTINGS_STORAGE_KEY);
-    if (savedConfigs) {
-      try {
-        const parsed = JSON.parse(savedConfigs);
-        if (Array.isArray(parsed)) {
-          setConfigs(parsed);
-        } else {
-          setConfigs(DEFAULT_CONFIGS);
-        }
-      } catch (e) {
-        console.error("加载设置失败：", e);
-        setConfigs(DEFAULT_CONFIGS);
-      }
-    } else {
-      setConfigs(DEFAULT_CONFIGS);
-    }
-
-    const savedFontSize = localStorage.getItem(FONT_SIZE_STORAGE_KEY);
-    if (savedFontSize) {
-      setFontSize(savedFontSize);
-    } else {
-      setFontSize("12px");
-    }
-  }, [isOpen]);
-
+  // 如果弹窗未打开，不渲染任何内容
   if (!isOpen) return null;
 
-  const checkOllamaStatus = async () => {
-    setOllamaStatus("checking");
-    setOllamaStatusMsg("正在连接本地后端代理...");
-    try {
-      const res = await fetch("http://127.0.0.1:5678/api/ollama/status");
-      const data = await res.json();
-      if (data.status === "online") {
-        setOllamaStatus("online");
-        setOllamaStatusMsg("服务在线 (Online)");
-      } else {
-        setOllamaStatus("offline");
-        setOllamaStatusMsg(data.message || "服务不可用 (Unavailable)");
-      }
-    } catch (err) {
-      setOllamaStatus("offline");
-      setOllamaStatusMsg("连接 Python Sidecar 失败，请检查后端运行状态");
-    }
-  };
-
-  const syncOllamaModels = async () => {
-    setIsSyncing(true);
-    try {
-      const res = await fetch("http://127.0.0.1:5678/api/ollama/tags");
-      if (!res.ok) throw new Error("获取模型列表失败");
-
-      const data = await res.json();
-      if (data.status === "success" && data.models) {
-        const fetchedModels = data.models;
-        setLocalModels(fetchedModels);
-
-        if (fetchedModels.length === 0) {
-          alert("Ollama 接口连接成功，但当前接口未返回可用模型列表。若为本地服务，请先执行 'ollama run <model>' 下载并拉起模型。");
-          return;
-        }
-
-        const savedConfigs = localStorage.getItem(SETTINGS_STORAGE_KEY);
-        let currentConfigs: ApiProviderConfig[] = [];
-        if (savedConfigs) {
-          try { currentConfigs = JSON.parse(savedConfigs); } catch (e) {}
-        }
-
-        const ollamaIdx = currentConfigs.findIndex(c => c.providerName.trim().toLowerCase() === "ollama");
-        const ollamaConfig: ApiProviderConfig = {
-          id: "ollama-local",
-          providerName: "Ollama",
-          baseUrl: "http://127.0.0.1:11434",
-          envKeyName: "None (Local)",
-          models: fetchedModels
-        };
-
-        if (ollamaIdx > -1) {
-          currentConfigs[ollamaIdx] = ollamaConfig;
-        } else {
-          currentConfigs.push(ollamaConfig);
-        }
-
-        setConfigs(currentConfigs);
-        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(currentConfigs));
-        window.dispatchEvent(new Event("tangerine_api_settings_changed"));
-
-        alert(`已成功同步 ${fetchedModels.length} 个 Ollama 模型并写入配置。`);
-      } else {
-        alert("未能获取到有效的 Ollama 模型列表。");
-      }
-    } catch (err: any) {
-      alert(`模型同步失败: ${err.message || "网络请求异常"}`);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const updateConfigField = (id: string, field: keyof ApiProviderConfig, value: any) => {
-    setConfigs(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
-    if (savedStatus[id]) {
-      setSavedStatus(prev => ({ ...prev, [id]: false }));
-    }
-  };
-
-  const handleModelChange = (id: string, index: number, value: string) => {
-    setConfigs(prev => prev.map(c => {
-      if (c.id === id) {
-        const newModels = [...c.models];
-        newModels[index] = value;
-        return { ...c, models: newModels };
-      }
-      return c;
-    }));
-    setSavedStatus(prev => ({ ...prev, [id]: false }));
-  };
-
-  const handleAddModel = (id: string) => {
-    setConfigs(prev => prev.map(c => {
-      if (c.id === id) {
-        return { ...c, models: [...c.models, "new-model"] };
-      }
-      return c;
-    }));
-    setSavedStatus(prev => ({ ...prev, [id]: false }));
-  };
-
-  const handleRemoveModel = (id: string, index: number) => {
-    setConfigs(prev => prev.map(c => {
-      if (c.id === id) {
-        const newModels = c.models.filter((_, i) => i !== index);
-        return { ...c, models: newModels };
-      }
-      return c;
-    }));
-    setSavedStatus(prev => ({ ...prev, [id]: false }));
-  };
-
-  const handleSaveConfig = (id: string) => {
-    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(configs));
-    setSavedStatus(prev => ({ ...prev, [id]: true }));
-    setTimeout(() => {
-      setSavedStatus(prev => ({ ...prev, [id]: false }));
-    }, 2000);
-    window.dispatchEvent(new Event("tangerine_api_settings_changed"));
-  };
-
-  const handleSaveFontSize = (newSize: string) => {
-    setFontSize(newSize);
-    localStorage.setItem(FONT_SIZE_STORAGE_KEY, newSize);
-    window.dispatchEvent(new Event("storage_font_size_changed"));
-    setFontSizeSaved(true);
-    setTimeout(() => setFontSizeSaved(false), 1500);
-  };
-
-  const handleAddConfigBlock = () => {
-    const newId = Date.now().toString();
-    const newConfig: ApiProviderConfig = {
-      id: newId,
-      providerName: "自定义提供商",
-      baseUrl: "https://api.example.com/v1",
-      envKeyName: "CUSTOM_API_KEY",
-      models: ["model-v1"],
-    };
-    setConfigs(prev => [...prev, newConfig]);
-  };
-
-  const handleRemoveConfigBlock = (id: string) => {
-    const filtered = configs.filter(c => c.id !== id);
-    setConfigs(filtered);
-    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(filtered));
-    window.dispatchEvent(new Event("tangerine_api_settings_changed"));
-  };
-
-  const toggleCollapse = (id: string) => {
-    setCollapsedModels(prev => ({ ...prev, [id]: !prev[id] }));
-  };
-
-  const cloudConfigs = configs.filter(c => c.providerName.trim().toLowerCase() !== "ollama");
-  const ollamaConfig = configs.find(c => c.providerName.trim().toLowerCase() === "ollama");
+  // 获取所有状态和业务逻辑方法
+  const {
+    activeTab, setActiveTab,
+    configs, savedStatus, collapsedModels,
+    ollamaStatus, ollamaStatusMsg, isSyncing,
+    fontSize, fontSizeSaved,
+    cloudConfigs, ollamaConfig,
+    checkOllamaStatus, syncOllamaModels,
+    updateConfigField, handleModelChange, handleAddModel, handleRemoveModel,
+    handleSaveConfig, handleAddConfigBlock, handleRemoveConfigBlock,
+    handleSaveFontSize, toggleCollapse
+  } = useSettingsManager(isOpen);
 
   return (
     <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-[#1c1c1d] select-text">
       <div className="w-full h-full flex overflow-hidden">
 
         {/* 左栏选项导航 */}
-        <div className="w-[240px] bg-[#141415] border-r border-[#2d2d2e] p-6 flex flex-col justify-between shrink-0">
-          <div>
-            <div className="flex items-center gap-3 px-2 py-2 mb-8">
-              <SettingsIcon size={18} className="text-amber-400 shrink-0" />
-              <span className="text-sm font-bold text-white tracking-wider uppercase">应用设置</span>
-            </div>
-
-            <div className="space-y-2">
-              <button
-                onClick={() => setActiveTab("api")}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-xs text-left transition-all cursor-pointer ${
-                  activeTab === "api"
-                    ? "bg-[#2b2b2c] text-amber-400 font-bold border border-amber-500/20 shadow-sm shadow-amber-500/5"
-                    : "text-gray-400 hover:text-white hover:bg-white/5 border border-transparent"
-                }`}
-              >
-                <SettingsIcon size={15} className="shrink-0" />
-                <span>云端模型设置</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab("local")}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-xs text-left transition-all cursor-pointer ${
-                  activeTab === "local"
-                    ? "bg-[#2b2b2c] text-amber-400 font-bold border border-amber-500/20 shadow-sm shadow-amber-500/5"
-                    : "text-gray-400 hover:text-white hover:bg-white/5 border border-transparent"
-                }`}
-              >
-                <Cpu size={15} className="shrink-0" />
-                <span>ollama模型设置</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab("format")}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-xs text-left transition-all cursor-pointer ${
-                  activeTab === "format"
-                    ? "bg-[#2b2b2c] text-amber-400 font-bold border border-amber-500/20 shadow-sm shadow-amber-500/5"
-                    : "text-gray-400 hover:text-white hover:bg-white/5 border border-transparent"
-                }`}
-              >
-                <Type size={15} className="shrink-0" />
-                <span>对话格式设置</span>
-              </button>
-            </div>
-          </div>
-
-          <div className="text-[10px] text-gray-500 font-mono px-4">
-            Tangerine Config v1.1
-          </div>
-        </div>
+        <SettingsSidebar activeTab={activeTab} setActiveTab={setActiveTab} />
 
         {/* 右侧主配置面板 */}
         <div className="flex-1 flex flex-col h-full bg-[#1e1e1f] overflow-hidden">
-
+          
           {/* 顶栏标题区与关闭按钮 */}
-          <div className="p-6 border-b border-white/5 shrink-0 flex items-center justify-between bg-[#19191a]">
-            <div>
-              <h1 className="text-lg font-bold text-white tracking-wide">
-                {activeTab === "api" && "云端模型提供商配置"}
-                {activeTab === "local" && "Ollama 模型配置"}
-                {activeTab === "format" && "对话格式配置"}
-              </h1>
-              <p className="text-xs text-gray-400 mt-1 leading-relaxed">
-                {activeTab === "api" && "管理和修改您部署在云端的商业大语言模型 API 路由和环境变量密钥。"}
-                {activeTab === "local" && "检测 Ollama 接口可用性、同步模型列表，并统一维护该接口下可调用的模型配置。"}
-                {activeTab === "format" && "定制主界面聊天窗口中对话文本的排版与呈现细节。"}
-              </p>
-            </div>
+          <SettingsHeader activeTab={activeTab} onClose={onClose} />
 
-            <div className="flex items-center gap-4 shrink-0">
-              <span className="text-[10px] text-gray-500 font-mono select-none bg-white/5 px-2.5 py-1.5 rounded">按ESC键关闭</span>
-              <button
-                onClick={onClose}
-                className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center transition-all border border-white/10 text-gray-300 hover:text-white cursor-pointer"
-                title="返回聊天"
-              >
-                <X size={16} />
-              </button>
-            </div>
-          </div>
-
+          {/* 内容滚动区域 */}
           <div className="flex-1 overflow-y-auto p-8 space-y-6 scrollbar-thin">
             {activeTab === "api" && (
-              <>
-                {cloudConfigs.map((config) => (
-                  <div
-                    key={config.id}
-                    className="p-6 rounded-xl border border-white/5 bg-[#141415] shadow-lg hover:border-white/10 transition-all"
-                  >
-                    <div className="flex items-center justify-between mb-5 pb-3 border-b border-white/5">
-                      <span className="text-xs font-bold text-amber-400 tracking-wider uppercase font-mono">
-                        {config.providerName || "未命名提供商"}
-                      </span>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => handleSaveConfig(config.id)}
-                          className={`flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-bold border transition-all cursor-pointer ${
-                            savedStatus[config.id]
-                              ? "bg-green-500/20 border-green-500/30 text-green-400"
-                              : "bg-[#253746] border-[#2d4558] text-[#4ea1db] hover:bg-[#2d4355]"
-                          }`}
-                        >
-                          {savedStatus[config.id] ? <Check size={12} /> : <Save size={12} />}
-                          <span>{savedStatus[config.id] ? "已保存" : "保存本配置"}</span>
-                        </button>
-
-                        {configs.length > 1 && (
-                          <button
-                            onClick={() => handleRemoveConfigBlock(config.id)}
-                            className="p-2 text-gray-400 hover:text-red-400 rounded-md hover:bg-white/5 transition-all cursor-pointer"
-                            title="删除此 API 信息块"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-12 gap-4 items-center">
-                        <label className="col-span-3 text-xs text-gray-200 font-semibold">提供商名称</label>
-                        <input
-                          type="text"
-                          value={config.providerName}
-                          onChange={(e) => updateConfigField(config.id, "providerName", e.target.value)}
-                          className="col-span-9 bg-[#1d1d1e] border border-white/5 rounded-md px-3.5 py-2.5 text-xs text-white font-medium placeholder-gray-500 outline-none focus:border-[#4ea1db] focus:ring-1 focus:ring-[#4ea1db]/30 transition-colors"
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-12 gap-4 items-center">
-                        <label className="col-span-3 text-xs text-gray-200 font-semibold">Base URL</label>
-                        <input
-                          type="text"
-                          value={config.baseUrl}
-                          onChange={(e) => updateConfigField(config.id, "baseUrl", e.target.value)}
-                          className="col-span-9 bg-[#1d1d1e] border border-white/5 rounded-md px-3.5 py-2.5 text-xs text-white font-mono placeholder-gray-500 outline-none focus:border-[#4ea1db] focus:ring-1 focus:ring-[#4ea1db]/30 transition-colors"
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-12 gap-4 items-center">
-                        <label className="col-span-3 text-xs text-gray-200 font-semibold">环境变量名称</label>
-                        <input
-                          type="text"
-                          value={config.envKeyName}
-                          onChange={(e) => updateConfigField(config.id, "envKeyName", e.target.value)}
-                          className="col-span-9 bg-[#1d1d1e] border border-white/5 rounded-md px-3.5 py-2.5 text-xs text-white font-mono placeholder-gray-500 outline-none focus:border-[#4ea1db] focus:ring-1 focus:ring-[#4ea1db]/30 transition-colors"
-                        />
-                      </div>
-
-                      <div className="border border-white/5 rounded-lg bg-[#19191a] overflow-hidden mt-4">
-                        <button
-                          onClick={() => toggleCollapse(config.id)}
-                          className="w-full flex items-center justify-between px-4 py-3 text-xs text-gray-200 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
-                        >
-                          <span className="font-semibold">可调用模型列表 ({config.models.length})</span>
-                          {collapsedModels[config.id] ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-                        </button>
-
-                        {!collapsedModels[config.id] && (
-                          <div className="p-4 border-t border-white/5 space-y-3 bg-[#111112]">
-                            {config.models.map((model, idx) => (
-                              <div key={idx} className="flex items-center gap-2.5">
-                                <input
-                                  type="text"
-                                  value={model}
-                                  onChange={(e) => handleModelChange(config.id, idx, e.target.value)}
-                                  className="flex-1 bg-[#1d1d1e] border border-white/5 rounded-md px-3 py-2 text-xs text-white font-mono placeholder-gray-500 outline-none focus:border-[#4ea1db] focus:ring-1 focus:ring-[#4ea1db]/30"
-                                />
-                                <button
-                                  onClick={() => handleRemoveModel(config.id, idx)}
-                                  className="text-gray-400 hover:text-red-400 p-2 rounded-md hover:bg-white/5 transition-colors cursor-pointer shrink-0"
-                                  title="移除此模型"
-                                >
-                                  <X size={14} />
-                                </button>
-                              </div>
-                            ))}
-                            <button
-                              onClick={() => handleAddModel(config.id)}
-                              className="flex items-center gap-1.5 text-xs text-[#4ea1db] hover:text-blue-300 font-bold mt-2 transition-colors cursor-pointer"
-                            >
-                              <Plus size={13} />
-                              <span>增加模型</span>
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-
-                <button
-                  onClick={handleAddConfigBlock}
-                  className="w-full py-5 border border-dashed border-white/10 hover:border-[#4ea1db]/50 rounded-xl flex items-center justify-center gap-2 hover:bg-white/5 text-xs text-gray-400 hover:text-[#4ea1db] transition-all cursor-pointer group"
-                >
-                  <Plus size={14} className="group-hover:rotate-90 transition-transform duration-200" />
-                  <span className="font-semibold">添加一个新 API 提供商配置块</span>
-                </button>
-              </>
+              <CloudModelsTab
+                cloudConfigs={cloudConfigs}
+                totalConfigsCount={configs.length}
+                savedStatus={savedStatus}
+                collapsedModels={collapsedModels}
+                onSave={handleSaveConfig}
+                onDelete={handleRemoveConfigBlock}
+                onAddBlock={handleAddConfigBlock}
+                onFieldChange={updateConfigField}
+                onModelChange={handleModelChange}
+                onAddModel={handleAddModel}
+                onRemoveModel={handleRemoveModel}
+                onToggleCollapse={toggleCollapse}
+              />
             )}
 
             {activeTab === "local" && (
-              <div className="space-y-6">
-                <div>
-                  <h3 className="text-sm font-bold text-amber-400 tracking-wider uppercase font-mono mb-2">
-                    OLLAMA 接口状态
-                  </h3>
-                  <p className="text-xs text-gray-400 mb-4">
-                    检测当前配置的 Ollama 接口是否可用，并同步该接口已暴露的模型列表。该接口既可以指向本机服务，也可以指向兼容的远程部署端点。
-                  </p>
-                </div>
-
-                <div className="rounded-xl border border-white/5 bg-[#141415] p-6 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <span className="relative flex h-3.5 w-3.5">
-                        {ollamaStatus === "online" && (
-                          <>
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500"></span>
-                          </>
-                        )}
-                        {ollamaStatus === "offline" && (
-                          <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-rose-500"></span>
-                        )}
-                        {(ollamaStatus === "unknown" || ollamaStatus === "checking") && (
-                          <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-amber-500 animate-pulse"></span>
-                        )}
-                      </span>
-                      <div>
-                        <div className="text-xs text-gray-400 font-semibold">Ollama 接口状态</div>
-                        <div className="text-sm font-bold text-white mt-0.5">{ollamaStatusMsg}</div>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={checkOllamaStatus}
-                      className="flex items-center gap-1.5 rounded-lg bg-white/5 hover:bg-white/10 px-3.5 py-2 text-xs font-bold text-gray-200 transition border border-white/10 cursor-pointer"
-                    >
-                      <RefreshCw size={13} className={ollamaStatus === "checking" ? "animate-spin" : ""} />
-                      检测状态
-                    </button>
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-white/5 bg-[#141415] p-6 space-y-4">
-                  <div>
-                    <h4 className="text-xs font-bold text-white mb-1">同步 Ollama 模型列表</h4>
-                    <p className="text-[11px] text-gray-500 leading-relaxed">
-                      从当前 Ollama 接口读取可用模型，并自动写入下方配置区。若该接口指向本机服务，通常返回的是本地已下载模型；若指向远程端点，则返回远程可调用模型。
-                    </p>
-                  </div>
-
-                  <button
-                    onClick={syncOllamaModels}
-                    disabled={isSyncing}
-                    className="flex items-center gap-2 rounded-md bg-amber-600 hover:bg-amber-500 disabled:bg-amber-800/50 px-4 py-2.5 text-xs font-bold text-white shadow-lg transition-all cursor-pointer"
-                  >
-                    {isSyncing ? "正在同步模型..." : "查询当前 Ollama 模型并写入配置"}
-                  </button>
-                </div>
-
-                {ollamaConfig && (
-                  <div
-                    key={ollamaConfig.id}
-                    className="p-6 rounded-xl border border-white/5 bg-[#141415] shadow-lg hover:border-white/10 transition-all"
-                  >
-                    <div className="flex items-center justify-between mb-5 pb-3 border-b border-white/5">
-                      <span className="text-xs font-bold text-emerald-400 tracking-wider uppercase font-mono">
-                        {ollamaConfig.providerName || "Ollama"}
-                      </span>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => handleSaveConfig(ollamaConfig.id)}
-                          className={`flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-bold border transition-all cursor-pointer ${
-                            savedStatus[ollamaConfig.id]
-                              ? "bg-green-500/20 border-green-500/30 text-green-400"
-                              : "bg-[#253746] border-[#2d4558] text-[#4ea1db] hover:bg-[#2d4355]"
-                          }`}
-                        >
-                          {savedStatus[ollamaConfig.id] ? <Check size={12} /> : <Save size={12} />}
-                          <span>{savedStatus[ollamaConfig.id] ? "已保存" : "保存本配置"}</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-12 gap-4 items-center">
-                        <label className="col-span-3 text-xs text-gray-200 font-semibold">提供商名称</label>
-                        <input
-                          type="text"
-                          disabled
-                          value={ollamaConfig.providerName}
-                          className="col-span-9 bg-[#1d1d1e]/50 border border-white/5 rounded-md px-3.5 py-2.5 text-xs text-gray-400 font-medium cursor-not-allowed outline-none"
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-12 gap-4 items-center">
-                        <label className="col-span-3 text-xs text-gray-200 font-semibold">Base URL</label>
-                        <input
-                          type="text"
-                          value={ollamaConfig.baseUrl}
-                          onChange={(e) => updateConfigField(ollamaConfig.id, "baseUrl", e.target.value)}
-                          className="col-span-9 bg-[#1d1d1e] border border-white/5 rounded-md px-3.5 py-2.5 text-xs text-white font-mono placeholder-gray-500 outline-none focus:border-[#4ea1db] focus:ring-1 focus:ring-[#4ea1db]/30 transition-colors"
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-12 gap-4 items-center">
-                        <label className="col-span-3 text-xs text-gray-200 font-semibold">环境变量名称</label>
-                        <input
-                          type="text"
-                          disabled
-                          value={ollamaConfig.envKeyName}
-                          className="col-span-9 bg-[#1d1d1e]/50 border border-white/5 rounded-md px-3.5 py-2.5 text-xs text-gray-400 font-mono cursor-not-allowed outline-none"
-                        />
-                      </div>
-
-                      <div className="border border-white/5 rounded-lg bg-[#19191a] overflow-hidden mt-4">
-                        <button
-                          onClick={() => toggleCollapse(ollamaConfig.id)}
-                          className="w-full flex items-center justify-between px-4 py-3 text-xs text-gray-200 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
-                        >
-                          <span className="font-semibold">可调用模型列表 ({ollamaConfig.models.length})</span>
-                          {collapsedModels[ollamaConfig.id] ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-                        </button>
-
-                        {!collapsedModels[ollamaConfig.id] && (
-                          <div className="p-4 border-t border-white/5 space-y-3 bg-[#111112]">
-                            {ollamaConfig.models.map((model, idx) => (
-                              <div key={idx} className="flex items-center gap-2.5">
-                                <input
-                                  type="text"
-                                  value={model}
-                                  onChange={(e) => handleModelChange(ollamaConfig.id, idx, e.target.value)}
-                                  className="flex-1 bg-[#1d1d1e] border border-white/5 rounded-md px-3 py-2 text-xs text-white font-mono placeholder-gray-500 outline-none focus:border-[#4ea1db] focus:ring-1 focus:ring-[#4ea1db]/30"
-                                />
-                                <button
-                                  onClick={() => handleRemoveModel(ollamaConfig.id, idx)}
-                                  className="text-gray-400 hover:text-red-400 p-2 rounded-md hover:bg-white/5 transition-colors cursor-pointer shrink-0"
-                                  title="移除此模型"
-                                >
-                                  <X size={14} />
-                                </button>
-                              </div>
-                            ))}
-                            <button
-                              onClick={() => handleAddModel(ollamaConfig.id)}
-                              className="flex items-center gap-1.5 text-xs text-[#4ea1db] hover:text-blue-300 font-bold mt-2 transition-colors cursor-pointer"
-                            >
-                              <Plus size={13} />
-                              <span>增加模型</span>
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
+              <OllamaModelsTab
+                ollamaStatus={ollamaStatus}
+                ollamaStatusMsg={ollamaStatusMsg}
+                isSyncing={isSyncing}
+                ollamaConfig={ollamaConfig}
+                savedStatus={savedStatus}
+                collapsedModels={collapsedModels}
+                onCheckStatus={checkOllamaStatus}
+                onSyncModels={syncOllamaModels}
+                onSave={handleSaveConfig}
+                onFieldChange={updateConfigField}
+                onModelChange={handleModelChange}
+                onAddModel={handleAddModel}
+                onRemoveModel={handleRemoveModel}
+                onToggleCollapse={toggleCollapse}
+              />
             )}
 
             {activeTab === "format" && (
-              <div className="p-6 rounded-xl border border-white/5 bg-[#141415] shadow-lg max-w-2xl">
-                <div className="flex items-center justify-between mb-6 pb-3 border-b border-white/5">
-                  <span className="text-xs font-bold text-amber-400 tracking-wider uppercase font-mono">
-                    排版与外观
-                  </span>
-                  {fontSizeSaved && (
-                    <span className="text-xs text-green-400 flex items-center gap-1">
-                      <Check size={12} /> 字号已应用
-                    </span>
-                  )}
-                </div>
-
-                <div className="space-y-6">
-                  <div className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs text-gray-200 font-semibold">调整字号</label>
-                      <span className="text-[10px] text-gray-400 font-mono bg-[#1d1d1e] px-2 py-0.5 rounded border border-white/5">
-                        当前大小: {fontSize}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-gray-500">
-                      仅缩放对话消息框内部的消息文字及 AI 回复内容。不影响按钮、输入框、侧边栏等应用框架元素。
-                    </p>
-
-                    <div className="relative mt-2 max-w-xs">
-                      <select
-                        value={fontSize}
-                        onChange={(e) => handleSaveFontSize(e.target.value)}
-                        className="w-full bg-[#1d1d1e] border border-white/10 rounded-md px-3.5 py-2.5 text-xs text-white font-medium outline-none focus:border-[#4ea1db] focus:ring-1 focus:ring-[#4ea1db]/30 transition-all cursor-pointer appearance-none"
-                      >
-                        {PRESET_FONT_SIZES.map((size) => (
-                          <option key={size.value} value={size.value} className="bg-[#1c1c1d] py-2 text-xs">
-                            {size.label}
-                          </option>
-                        ))}
-                      </select>
-                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-gray-400">
-                        <ChevronDown size={14} />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="border border-white/5 rounded-lg bg-[#19191a] p-4 mt-4">
-                    <span className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider block mb-2.5">效果预览 (以选定字号渲染)：</span>
-                    <div className="space-y-3">
-                      <div className="flex justify-end">
-                        <div
-                          style={{ fontSize: fontSize }}
-                          className="max-w-[85%] p-3 rounded-lg bg-[#2b6cb0] text-white rounded-tr-none leading-relaxed"
-                        >
-                          热狗🌭的起源是什么
-                        </div>
-                      </div>
-                      <div className="flex justify-start">
-                        <div
-                          style={{ fontSize: fontSize }}
-                          className="max-w-[85%] p-3 rounded-lg bg-[#2e2e2e] text-gray-200 border border-[#3a3a3a] rounded-tl-none leading-relaxed"
-                        >
-                          热狗的起源主要与德国和奥地利的香肠传统有关，后来在美国演变成如今常见的“面包夹香肠”形式...
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <FormatSettingsTab
+                fontSize={fontSize}
+                fontSizeSaved={fontSizeSaved}
+                onSaveFontSize={handleSaveFontSize}
+              />
             )}
           </div>
         </div>

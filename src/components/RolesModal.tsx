@@ -2,7 +2,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { X, Plus, Trash2, Check, UserSquare2, Sparkles, ChevronDown } from 'lucide-react';
 import { Role } from '../types/chat';
-import { ApiProviderConfig } from './SettingsModal';
+// 修正导入路径：从重构后的 types 文件中导入
+import { ApiProviderConfig } from './settings/types'; 
 
 interface RolesModalProps {
   isOpen: boolean;
@@ -85,7 +86,8 @@ export default function RolesModal({ isOpen, onClose }: RolesModalProps) {
       .filter((name): name is string => !!name);
   }, [providerConfigs]);
 
-  const availableModelsForSelectedProvider = useMemo(() => {
+  // 显式声明返回类型为 string[]，彻底解决隐式 any 报错
+  const availableModelsForSelectedProvider = useMemo<string[]>(() => {
     if (!editRole?.provider) return [];
     const matched = providerConfigs.find(
       cfg => cfg.providerName.toLowerCase() === editRole.provider?.toLowerCase()
@@ -414,6 +416,7 @@ export default function RolesModal({ isOpen, onClose }: RolesModalProps) {
                         className="w-full appearance-none bg-[#121213] border border-[#303033] focus:border-amber-500 rounded-xl px-3 py-2.5 pr-10 text-sm text-white outline-none transition-colors cursor-pointer disabled:text-gray-600 disabled:cursor-not-allowed"
                       >
                         <option value="">不绑定</option>
+                        {/* 此处 model 现在会被正确推断为 string 类型 */}
                         {availableModelsForSelectedProvider.map(model => (
                           <option key={model} value={model}>
                             {model}
