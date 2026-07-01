@@ -1,215 +1,89 @@
-// src/components/automation/FlowEditor.tsx
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useRef } from "react";
 import {
   ReactFlow,
   addEdge,
-  useNodesState,
-  useEdgesState,
-  Controls,
   Background,
   BackgroundVariant,
   Connection,
+  Controls,
   MiniMap,
   useReactFlow
 } from "@xyflow/react";
-import type { EdgeChange, NodeChange, OnNodeDrag } from "@xyflow/react";
-import { Role } from "../../types/chat";
 import AutomationFloatingToolbar from "./AutomationToolbar";
 import DragGhost from "./DragGhost";
 import SystemTimeBadge from "./SystemTimeBadge";
 import { nodeTypes } from "./AutomationNodes";
-import { MAX_HISTORY_LENGTH } from "./automationConstants";
-import {
-  applyCollectionStickiness,
-  areSnapshotsEqual,
-  buildAutomationNode,
-  cloneFlowSnapshot,
-  generateUniqueEdgeId,
-  generateUniqueId,
-  getDescendantNodeIds,
-  getNodeAbsolutePosition,
-  getNodeSize,
-  isEditableElement
-} from "./automationNodeUtils";
-import {
-  safeLoadAutomationClipboard,
-  safeLoadAutomationFlow,
-  safeLoadRoles,
-  safeSaveAutomationClipboard,
-  safeSaveAutomationFlow
-} from "./automationStorage";
-import type {
-  AutomationClipboard,
-  AutomationFlowEdge,
-  AutomationFlowNode,
-  AutomationFlowSnapshot,
-  AutomationNodeData,
-  AutomationTemplate,
-  FlowPoint,
-  PointerPreview
-} from "./automationTypes";
+import type { AutomationFlowEdge, AutomationFlowNode, AutomationNodeData, FlowPoint } from "./automationTypes";
+
+// 引入解耦后的自定义 Hooks
+import { useFlowHistory } from "./hooks/useFlowHistory";
+import { useFlowPersistence } from "./hooks/useFlowPersistence";
+import { useFlowRoles } from "./hooks/useFlowRoles";
+import { useFlowTemplateDrag } from "./hooks/useFlowTemplateDrag";
+import { useFlowClipboard } from "./hooks/useFlowClipboard";
+import { useFlowShortcuts } from "./hooks/useFlowShortcuts";
 
 export default function FlowEditor({ sessionId }: { sessionId: string }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
-
-  const [nodes, setNodes, rawOnNodesChange] = useNodesState<AutomationFlowNode>([]);
-  const [edges, setEdges, rawOnEdgesChange] = useEdgesState<AutomationFlowEdge>([]);
-
-  const [roles, setRoles] = useState<Role[]>(() => safeLoadRoles());
-  const [draggingTemplate, setDraggingTemplate] = useState<AutomationTemplate | null>(null);
-  const [pointerPreview, setPointerPreview] = useState<PointerPreview | null>(null);
+  const hydratedRef = useRef(false);
+  const mouseClientPositionRef = useRef<FlowPoint | null>(null);
 
   const { screenToFlowPosition } = useReactFlow();
 
-  const hydratedRef = useRef(false);
-  const persistTimerRef = useRef<number | null>(null);
-  const resizeHistoryTimerRef = useRef<number | null>(null);
-  const resizeHistoryArmedRef = useRef(false);
-  const mouseClientPositionRef = useRef<PointerPreview | null>(null);
-  const dragStartSnapshotRef = useRef<AutomationFlowSnapshot | null>(null);
-  const historyRef = useRef<AutomationFlowSnapshot[]>([]);
-  const flowStateRef = useRef<AutomationFlowSnapshot>({
-    nodes: [],
-    edges: []
-  });
+  // 1. 核心状态与历史记录
+  const {
+    nodes, setNodes, edges, setEdges, flowStateRef,
+    historyRef, dragStartSnapshotRef, resizeHistoryArmedRef,
+    onNodesChange, onEdgesChange, handleNodeDragStart, handleNodeDragStop,
+    pushCurrentHistorySnapshot, undoLastOperation
+  } = useFlowHistory(hydratedRef);
 
-  useEffect(() => {
-    flowStateRef.current = {
-      nodes,
-      edges
-    };
-  }, [nodes, edges]);
+  // 2. 本地持久化
+  useFlowPersistence(
+    sessionId, nodes, edges, setNodes, setEdges,
+    hydratedRef, historyRef, dragStartSnapshotRef, resizeHistoryArmedRef
+  );
 
-  const pushHistorySnapshot = useCallback((snapshot: AutomationFlowSnapshot) => {
-    const clonedSnapshot = cloneFlowSnapshot(snapshot);
-    const lastSnapshot = historyRef.current[historyRef.current.length - 1];
+  // 3. 角色与模板数据
+  const { roleItems, reloadRoles } = useFlowRoles();
 
-    if (lastSnapshot && areSnapshotsEqual(lastSnapshot, clonedSnapshot)) {
-      return;
+  // 4. 模板拖拽创建
+  const { draggingTemplate, pointerPreview, handleTemplatePointerDown } = useFlowTemplateDrag(
+    wrapperRef, pushCurrentHistorySnapshot, setNodes
+  );
+
+  // 计算当前鼠标在画布中的流坐标（供粘贴功能使用）
+  const getCurrentMouseFlowPosition = useCallback((): FlowPoint => {
+    const pointer = mouseClientPositionRef.current;
+    const wrapper = wrapperRef.current;
+
+    if (pointer) {
+      return screenToFlowPosition({ x: pointer.x, y: pointer.y });
     }
 
-    historyRef.current = [...historyRef.current, clonedSnapshot].slice(-MAX_HISTORY_LENGTH);
-  }, []);
-
-  const pushCurrentHistorySnapshot = useCallback(() => {
-    pushHistorySnapshot(flowStateRef.current);
-  }, [pushHistorySnapshot]);
-
-  useEffect(() => {
-    hydratedRef.current = false;
-    historyRef.current = [];
-    dragStartSnapshotRef.current = null;
-    resizeHistoryArmedRef.current = false;
-
-    const snapshot = safeLoadAutomationFlow(sessionId);
-    setNodes(snapshot.nodes);
-    setEdges(snapshot.edges);
-
-    window.requestAnimationFrame(() => {
-      hydratedRef.current = true;
-    });
-  }, [sessionId, setNodes, setEdges]);
-
-  useEffect(() => {
-    if (!hydratedRef.current) return;
-
-    if (persistTimerRef.current !== null) {
-      window.clearTimeout(persistTimerRef.current);
-    }
-
-    persistTimerRef.current = window.setTimeout(() => {
-      safeSaveAutomationFlow(sessionId, {
-        nodes,
-        edges
+    if (wrapper) {
+      const rect = wrapper.getBoundingClientRect();
+      return screenToFlowPosition({
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2
       });
-      persistTimerRef.current = null;
-    }, 220);
-
-    return () => {
-      if (persistTimerRef.current !== null) {
-        window.clearTimeout(persistTimerRef.current);
-        persistTimerRef.current = null;
-      }
-    };
-  }, [sessionId, nodes, edges]);
-
-  const reloadRoles = useCallback(() => {
-    setRoles(safeLoadRoles());
-  }, []);
-
-  useEffect(() => {
-    const handleStorageChange = () => reloadRoles();
-    window.addEventListener("storage", handleStorageChange);
-    return () => window.removeEventListener("storage", handleStorageChange);
-  }, [reloadRoles]);
-
-  const roleItems: AutomationTemplate[] = useMemo(() => {
-    if (roles.length === 0) {
-      return [
-        {
-          id: "role-empty-placeholder",
-          nodeKind: "role",
-          title: "暂无角色",
-          subtitle: "请先在“我的角色”中创建",
-          description: "创建角色后，可在这里拖拽到工作流画布。",
-          icon: "role",
-          colorClass: "bg-amber-500/20 border-amber-500/40 text-amber-400",
-          disabled: true
-        }
-      ];
     }
 
-    return roles.map((role) => ({
-      id: `role-${role.id}`,
-      nodeKind: "role" as const,
-      title: role.name,
-      subtitle: "角色节点",
-      description: role.systemPrompt,
-      icon: "role" as const,
-      colorClass: "bg-amber-500/20 border-amber-500/40 text-amber-400",
-      payload: {
-        roleId: role.id,
-        systemPrompt: role.systemPrompt
-      }
-    }));
-  }, [roles]);
+    return { x: 0, y: 0 };
+  }, [screenToFlowPosition]);
 
-  const onNodesChange = useCallback(
-    (changes: NodeChange<AutomationFlowNode>[]) => {
-      const hasDimensionChange = changes.some((change) => change.type === "dimensions");
-
-      if (hydratedRef.current && hasDimensionChange && !resizeHistoryArmedRef.current) {
-        resizeHistoryArmedRef.current = true;
-        pushCurrentHistorySnapshot();
-      }
-
-      if (resizeHistoryTimerRef.current !== null) {
-        window.clearTimeout(resizeHistoryTimerRef.current);
-      }
-
-      if (hasDimensionChange) {
-        resizeHistoryTimerRef.current = window.setTimeout(() => {
-          resizeHistoryArmedRef.current = false;
-          resizeHistoryTimerRef.current = null;
-        }, 500);
-      }
-
-      rawOnNodesChange(changes);
-    },
-    [pushCurrentHistorySnapshot, rawOnNodesChange]
+  // 5. 剪贴板操作
+  const { copySelectedElements, pasteClipboardAtMouse, deleteSelectedElements } = useFlowClipboard(
+    flowStateRef, setNodes, setEdges, pushCurrentHistorySnapshot, getCurrentMouseFlowPosition
   );
 
-  const onEdgesChange = useCallback(
-    (changes: EdgeChange<AutomationFlowEdge>[]) => {
-      rawOnEdgesChange(changes);
-    },
-    [rawOnEdgesChange]
-  );
+  // 6. 全局快捷键
+  useFlowShortcuts(copySelectedElements, pasteClipboardAtMouse, deleteSelectedElements, undoLastOperation);
 
+  // 节点连线处理
   const onConnect = useCallback(
     (params: Connection) => {
       pushCurrentHistorySnapshot();
-
       setEdges((eds) =>
         addEdge(
           {
@@ -226,385 +100,6 @@ export default function FlowEditor({ sessionId }: { sessionId: string }) {
     },
     [pushCurrentHistorySnapshot, setEdges]
   );
-
-  const handleNodeDragStart = useCallback<OnNodeDrag<AutomationFlowNode>>(() => {
-    dragStartSnapshotRef.current = cloneFlowSnapshot(flowStateRef.current);
-  }, []);
-
-  const handleNodeDragStop = useCallback<OnNodeDrag<AutomationFlowNode>>(
-    (_event, draggedNode) => {
-      const startSnapshot = dragStartSnapshotRef.current;
-
-      setNodes((currentNodes) => {
-        if (startSnapshot) {
-          const currentSnapshot = {
-            nodes: currentNodes,
-            edges: flowStateRef.current.edges
-          };
-
-          if (!areSnapshotsEqual(startSnapshot, currentSnapshot)) {
-            pushHistorySnapshot(startSnapshot);
-          }
-        }
-
-        return applyCollectionStickiness(currentNodes, draggedNode.id);
-      });
-
-      dragStartSnapshotRef.current = null;
-    },
-    [pushHistorySnapshot, setNodes]
-  );
-
-  const createNodeAtClientPosition = useCallback(
-    (clientX: number, clientY: number, template: AutomationTemplate) => {
-      const wrapper = wrapperRef.current;
-      if (!wrapper || template.disabled) return;
-
-      const rect = wrapper.getBoundingClientRect();
-
-      const isInsideCanvas =
-        clientX >= rect.left &&
-        clientX <= rect.right &&
-        clientY >= rect.top &&
-        clientY <= rect.bottom;
-
-      if (!isInsideCanvas) return;
-
-      const position = screenToFlowPosition({
-        x: clientX,
-        y: clientY
-      });
-
-      const newNode = buildAutomationNode(template, position);
-
-      pushCurrentHistorySnapshot();
-
-      setNodes((nds) => {
-        if (newNode.type === "automationCollectionNode") {
-          return [newNode, ...nds];
-        }
-
-        return nds.concat(newNode);
-      });
-    },
-    [pushCurrentHistorySnapshot, screenToFlowPosition, setNodes]
-  );
-
-  const handleTemplatePointerDown = useCallback(
-    (event: React.PointerEvent, template: AutomationTemplate) => {
-      if (event.button !== 0 || template.disabled) return;
-
-      event.preventDefault();
-      event.stopPropagation();
-
-      setDraggingTemplate(template);
-      setPointerPreview({
-        x: event.clientX,
-        y: event.clientY
-      });
-    },
-    []
-  );
-
-  const getCurrentMouseFlowPosition = useCallback((): FlowPoint => {
-    const pointer = mouseClientPositionRef.current;
-    const wrapper = wrapperRef.current;
-
-    if (pointer) {
-      return screenToFlowPosition({
-        x: pointer.x,
-        y: pointer.y
-      });
-    }
-
-    if (wrapper) {
-      const rect = wrapper.getBoundingClientRect();
-      return screenToFlowPosition({
-        x: rect.left + rect.width / 2,
-        y: rect.top + rect.height / 2
-      });
-    }
-
-    return {
-      x: 0,
-      y: 0
-    };
-  }, [screenToFlowPosition]);
-
-  const copySelectedElements = useCallback(() => {
-    const currentNodes = flowStateRef.current.nodes;
-    const currentEdges = flowStateRef.current.edges;
-    const directlySelectedNodeIds = new Set(
-      currentNodes.filter((node) => node.selected).map((node) => node.id)
-    );
-
-    if (directlySelectedNodeIds.size === 0) return;
-
-    // 选中集合时，复制集合以及所有已吸附在集合内的子孙节点。
-    // 普通节点不受影响，仍然只复制自身。
-    const copiedNodeIds = getDescendantNodeIds(currentNodes, directlySelectedNodeIds);
-    const copiedNodes = currentNodes.filter((node) => copiedNodeIds.has(node.id));
-
-    const copiedEdges = currentEdges.filter(
-      (edge) => copiedNodeIds.has(edge.source) && copiedNodeIds.has(edge.target)
-    );
-
-    const clipboard: AutomationClipboard = {
-      version: 1,
-      nodes: copiedNodes.map((node) => ({
-        node: {
-          ...node,
-          selected: false
-        },
-        absolutePosition: getNodeAbsolutePosition(currentNodes, node)
-      })),
-      edges: copiedEdges.map((edge) => ({
-        ...edge,
-        selected: false
-      })),
-      copiedAt: Date.now()
-    };
-
-    safeSaveAutomationClipboard(clipboard);
-  }, []);
-
-  const pasteClipboardAtMouse = useCallback(() => {
-    const clipboard = safeLoadAutomationClipboard();
-    if (!clipboard || clipboard.nodes.length === 0) return;
-
-    const pasteAnchor = getCurrentMouseFlowPosition();
-
-    const minX = Math.min(...clipboard.nodes.map((item) => item.absolutePosition.x));
-    const minY = Math.min(...clipboard.nodes.map((item) => item.absolutePosition.y));
-    const maxX = Math.max(
-      ...clipboard.nodes.map((item) => {
-        const size = getNodeSize(item.node);
-        return item.absolutePosition.x + size.width;
-      })
-    );
-    const maxY = Math.max(
-      ...clipboard.nodes.map((item) => {
-        const size = getNodeSize(item.node);
-        return item.absolutePosition.y + size.height;
-      })
-    );
-
-    const sourceCenter = {
-      x: minX + (maxX - minX) / 2,
-      y: minY + (maxY - minY) / 2
-    };
-
-    const idMap = new Map<string, string>();
-    clipboard.nodes.forEach((item) => {
-      idMap.set(item.node.id, generateUniqueId());
-    });
-
-    const absolutePositionMap = new Map<string, FlowPoint>();
-    clipboard.nodes.forEach((item) => {
-      const nextId = idMap.get(item.node.id);
-      if (!nextId) return;
-
-      absolutePositionMap.set(nextId, {
-        x: item.absolutePosition.x - sourceCenter.x + pasteAnchor.x,
-        y: item.absolutePosition.y - sourceCenter.y + pasteAnchor.y
-      });
-    });
-
-    const pastedNodes: AutomationFlowNode[] = clipboard.nodes.map((item) => {
-      const nextId = idMap.get(item.node.id) || generateUniqueId();
-      const nextAbsolutePosition = absolutePositionMap.get(nextId) || pasteAnchor;
-      const originalParentId = item.node.parentId;
-      const nextParentId = originalParentId ? idMap.get(originalParentId) : undefined;
-
-      // 如果原节点属于被复制的集合，粘贴后继续属于新集合。
-      // 由于父子节点整体位移一致，所以内部元素相对集合的位置保持不变。
-      const nextPosition =
-        nextParentId && absolutePositionMap.has(nextParentId)
-          ? {
-              x: nextAbsolutePosition.x - absolutePositionMap.get(nextParentId)!.x,
-              y: nextAbsolutePosition.y - absolutePositionMap.get(nextParentId)!.y
-            }
-          : nextAbsolutePosition;
-
-      return {
-        ...item.node,
-        id: nextId,
-        parentId: nextParentId,
-        selected: true,
-        position: nextPosition,
-        zIndex:
-          item.node.data.automationType === "collection"
-            ? -1
-            : item.node.zIndex || 10
-      };
-    });
-
-    const pastedEdges: AutomationFlowEdge[] = clipboard.edges
-      .map((edge) => {
-        const nextSource = idMap.get(edge.source);
-        const nextTarget = idMap.get(edge.target);
-
-        if (!nextSource || !nextTarget) return null;
-
-        return {
-          ...edge,
-          id: generateUniqueEdgeId(),
-          source: nextSource,
-          target: nextTarget,
-          selected: false
-        } as AutomationFlowEdge;
-      })
-      .filter(Boolean) as AutomationFlowEdge[];
-
-    pushCurrentHistorySnapshot();
-
-    setNodes((currentNodes): AutomationFlowNode[] => {
-      const unselectedCurrentNodes: AutomationFlowNode[] = currentNodes.map(
-        (node): AutomationFlowNode => ({
-          ...node,
-          selected: false
-        })
-      );
-
-      return [...unselectedCurrentNodes, ...pastedNodes].sort((a, b) => {
-        const aIsCollection = a.data.automationType === "collection";
-        const bIsCollection = b.data.automationType === "collection";
-
-        if (aIsCollection === bIsCollection) return 0;
-        return aIsCollection ? -1 : 1;
-      });
-    });
-
-    setEdges((currentEdges): AutomationFlowEdge[] => {
-      const unselectedCurrentEdges: AutomationFlowEdge[] = currentEdges.map(
-        (edge): AutomationFlowEdge => ({
-          ...edge,
-          selected: false
-        })
-      );
-
-      return [...unselectedCurrentEdges, ...pastedEdges];
-    });
-  }, [getCurrentMouseFlowPosition, pushCurrentHistorySnapshot, setEdges, setNodes]);
-
-  const deleteSelectedElements = useCallback(() => {
-    const currentNodes = flowStateRef.current.nodes;
-    const currentEdges = flowStateRef.current.edges;
-    const selectedNodeIds = new Set(
-      currentNodes.filter((node) => node.selected).map((node) => node.id)
-    );
-    const selectedEdgeIds = new Set(
-      currentEdges.filter((edge) => edge.selected).map((edge) => edge.id)
-    );
-
-    if (selectedNodeIds.size === 0 && selectedEdgeIds.size === 0) return;
-
-    const idsToDelete = getDescendantNodeIds(currentNodes, selectedNodeIds);
-
-    pushCurrentHistorySnapshot();
-
-    setNodes((current) => current.filter((node) => !idsToDelete.has(node.id)));
-    setEdges((current) =>
-      current.filter(
-        (edge) =>
-          !selectedEdgeIds.has(edge.id) &&
-          !idsToDelete.has(edge.source) &&
-          !idsToDelete.has(edge.target)
-      )
-    );
-  }, [pushCurrentHistorySnapshot, setEdges, setNodes]);
-
-  const undoLastOperation = useCallback(() => {
-    const previousSnapshot = historyRef.current[historyRef.current.length - 1];
-    if (!previousSnapshot) return;
-
-    historyRef.current = historyRef.current.slice(0, -1);
-
-    const clonedSnapshot = cloneFlowSnapshot(previousSnapshot);
-    setNodes(clonedSnapshot.nodes);
-    setEdges(clonedSnapshot.edges);
-  }, [setEdges, setNodes]);
-
-  useEffect(() => {
-    if (!draggingTemplate) return;
-
-    const previousCursor = document.body.style.cursor;
-    const previousUserSelect = document.body.style.userSelect;
-
-    document.body.style.cursor = "grabbing";
-    document.body.style.userSelect = "none";
-
-    const handlePointerMove = (event: PointerEvent) => {
-      setPointerPreview({
-        x: event.clientX,
-        y: event.clientY
-      });
-    };
-
-    const handlePointerUp = (event: PointerEvent) => {
-      createNodeAtClientPosition(event.clientX, event.clientY, draggingTemplate);
-      setDraggingTemplate(null);
-      setPointerPreview(null);
-    };
-
-    const handlePointerCancel = () => {
-      setDraggingTemplate(null);
-      setPointerPreview(null);
-    };
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-    window.addEventListener("pointercancel", handlePointerCancel);
-
-    return () => {
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousUserSelect;
-
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-      window.removeEventListener("pointercancel", handlePointerCancel);
-    };
-  }, [draggingTemplate, createNodeAtClientPosition]);
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (isEditableElement(event.target)) return;
-
-      const key = event.key.toLowerCase();
-      const isCtrlOrMeta = event.ctrlKey || event.metaKey;
-
-      if ((event.key === "Delete" || event.key === "Backspace") && !isCtrlOrMeta) {
-        event.preventDefault();
-        deleteSelectedElements();
-        return;
-      }
-
-      if (isCtrlOrMeta && key === "c") {
-        event.preventDefault();
-        copySelectedElements();
-        return;
-      }
-
-      if (isCtrlOrMeta && key === "v") {
-        event.preventDefault();
-        pasteClipboardAtMouse();
-        return;
-      }
-
-      if (isCtrlOrMeta && key === "z") {
-        event.preventDefault();
-        undoLastOperation();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [
-    copySelectedElements,
-    deleteSelectedElements,
-    pasteClipboardAtMouse,
-    undoLastOperation
-  ]);
 
   return (
     <div

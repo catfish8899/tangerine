@@ -33,16 +33,25 @@ tangerine-agent/
 │   │   │   ├── CloudModelsTab.tsx      # 云端模型设置 Tab 内容
 │   │   │   ├── OllamaModelsTab.tsx     # Ollama 模型设置 Tab 内容
 │   │   │   └── FormatSettingsTab.tsx   # 对话格式设置 Tab 内容
+│   │   │
 │   │   ├── automation/                 # 自动化画布子模块
-│   │   │   ├── automationConstants.ts  # 画布常量
-│   │   │   ├── automationTypes.ts      # 画布类型定义
-│   │   │   ├── automationStorage.ts    # 画布存储封装
-│   │   │   ├── automationNodeUtils.ts  # 纯函数工具：ID、快照、集合关系、子孙查找等
-│   │   │   ├── AutomationNodes.tsx     # 自定义节点组件与 nodeTypes
+│   │   │   ├── hooks/                  # 画布核心逻辑解耦子模块
+│   │   │   │   ├── useFlowHistory.ts       # 核心状态与历史记录：节点/边状态、撤销重做、拖拽/缩放快照
+│   │   │   │   ├── useFlowPersistence.ts   # 本地持久化：LocalStorage 加载与防抖保存、会话切换重置
+│   │   │   │   ├── useFlowRoles.ts         # 角色与模板管理：角色数据加载、跨窗口同步、模板列表映射
+│   │   │   │   ├── useFlowTemplateDrag.ts  # 模板拖拽创建：全局指针事件监听、屏幕到画布坐标转换与节点创建
+│   │   │   │   ├── useFlowClipboard.ts     # 剪贴板与元素操作：复制、粘贴（含集合子孙节点复杂计算）、删除
+│   │   │   │   └── useFlowShortcuts.ts     # 全局快捷键：监听 Delete/Ctrl+C/V/Z 并分发操作
+│   │   │   ├── automationConstants.ts  # 画布常量 (如最大历史记录长度)
+│   │   │   ├── automationTypes.ts      # 画布类型定义 (节点、边、快照、剪贴板等)
+│   │   │   ├── automationStorage.ts    # 画布存储封装 (LocalStorage 读写安全处理)
+│   │   │   ├── automationNodeUtils.ts  # 纯函数工具：ID生成、快照比对、集合关系、子孙查找等
+│   │   │   ├── AutomationNodes.tsx     # 自定义节点组件与 nodeTypes 注册
 │   │   │   ├── AutomationToolbar.tsx   # 底部工具栏；Pointer 拖拽起点
-│   │   │   ├── DragGhost.tsx           # 拖拽幽灵预览
-│   │   │   ├── SystemTimeBadge.tsx     # 系统时间徽标
-│   │   │   └── FlowEditor.tsx          # 主画布编辑器；节点、边、快捷键、复制粘贴、撤销重做
+│   │   │   ├── DragGhost.tsx           # 拖拽幽灵预览组件
+│   │   │   ├── SystemTimeBadge.tsx     # 系统时间徽标组件
+│   │   │   └── FlowEditor.tsx          # 主画布编辑器（视图层）：状态组装、ReactFlow 渲染与 UI 组合
+│   │   │
 │   │   ├── chat/                       # 聊天界面相关组件 (消息气泡、输入框、分支切换器等)
 │   │   └── common/                     # 通用组件 (全局右键菜单、警告提示、图片预览等)
 │   │
@@ -92,6 +101,17 @@ tangerine-agent/
 
 **优势**：主入口 `useChatManager.ts` 仅负责依赖注入和跨模块副作用联动，对外暴露的 `state`、`refs` 和 `actions` 接口保持 100% 兼容，调用方（如 `App.tsx`）无需感知内部重构。
 
-### 2. 多模型与算力调度
+### 2. 自动化画布核心状态解耦 (`FlowEditor`)
+工作流画布 (`FlowEditor.tsx`) 包含大量复杂的交互逻辑（如拖拽创建、集合节点嵌套计算、剪贴板坐标映射等）。为避免“上帝组件”问题，将其核心逻辑剥离至 `automation/hooks/` 目录下的 6 个独立 Hook 中：
+- **`useFlowHistory`**：核心状态中枢。管理 `nodes` 和 `edges` 状态，处理历史记录栈（撤销/重做），以及节点拖拽、缩放时的快照记录逻辑。
+- **`useFlowPersistence`**：IO 副作用隔离。专门负责从 LocalStorage 加载画布数据，并在状态变化时进行防抖保存，同时处理会话切换时的状态重置。
+- **`useFlowRoles`**：数据源管理。负责角色数据的加载、监听 `storage` 事件实现跨窗口同步，并将角色数据映射为画布可用的模板列表。
+- **`useFlowTemplateDrag`**：交互逻辑封装。处理从工具栏拖拽模板到画布的全局指针事件，并计算屏幕坐标到画布坐标的转换以创建新节点。
+- **`useFlowClipboard`**：复杂业务逻辑隔离。专门处理复制、粘贴（包含集合节点子孙节点的复杂坐标计算与 ID 映射）以及删除逻辑。
+- **`useFlowShortcuts`**：全局事件绑定。纯粹负责监听全局键盘事件，并分发到对应的操作函数。
+
+**优势**：重构后的 `FlowEditor.tsx` 代码量大幅减少，从“业务逻辑处理中心”转变为纯粹的“状态组装器”和“视图渲染层”。这不仅降低了认知负担，还通过物理隔离减少了无关状态更新导致的闭包重建，提升了大型画布的渲染性能。
+
+### 3. 多模型与算力调度
 - **AMD 生态兼容**：框架不依赖任何 NVIDIA 专属生态（如 CUDA 强绑定），Ollama 侧车支持 AMD ROCm 或纯 CPU 推理，云端模型通过标准 OpenAI 兼容 API 调用。
 - **算力保护**：Python Sidecar (`main.py`) 通过 FastAPI 的 `Request.is_disconnected()` 实时检测前端 SSE 连接状态。若用户点击“停止生成”或关闭应用，Sidecar 会立即切断推理算力，避免资源浪费。
