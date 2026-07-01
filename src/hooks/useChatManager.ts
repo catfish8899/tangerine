@@ -5,7 +5,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Message, ChatSession, AttachmentFile, getFileType, Role } from "../types/chat";
-import { ApiProviderConfig } from "../components/SettingsModal";
+// 【修复1】：根据重构后的目录结构，ApiProviderConfig 已移动至 settings/types.ts
+import { ApiProviderConfig } from "../components/settings/types";
 
 const STORAGE_KEY = "tangerine_chat_sessions";
 const FONT_SIZE_STORAGE_KEY = "tangerine_font_size";
@@ -238,7 +239,8 @@ export function useChatManager() {
       const models = Array.isArray(cfg.models) ? cfg.models.filter(Boolean) : [];
       const category = getModelCategoryFromConfig(cfg);
 
-      return models.map(model => ({
+      // 【修复2】：显式指定 model 类型为 string，消除隐式 any 报错
+      return models.map((model: string) => ({
         model,
         providerName: cfg.providerName || "未命名提供商",
         category,
