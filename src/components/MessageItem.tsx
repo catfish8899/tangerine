@@ -14,10 +14,10 @@ import {
   Search,
   CheckCircle2,
   ExternalLink,
-  StopCircle // 新增：停止图标
+  StopCircle 
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-shell";
-import { Message, getFileType, format12HourTime } from "../types/chat";
+import { Message, format12HourTime } from "../types/chat";
 import MarkdownMessage from "./MarkdownMessage";
 
 interface MessageItemProps {
@@ -47,7 +47,6 @@ export default function MessageItem({
   const activeIdx = msg.activeBranchIndex ?? 0;
   const branchesCount = msg.branches ? msg.branches.length : 0;
 
-  // 控制网络搜索抽屉的展开与折叠状态
   const [isSourcesOpen, setIsSourcesOpen] = useState(false);
 
   const renderAttachmentIcon = (type: "image" | "audio" | "code" | "office" | "other") => {
@@ -65,7 +64,6 @@ export default function MessageItem({
     }
   };
 
-  // 通过默认浏览器打开 URL
   const handleOpenUrl = async (url: string) => {
     try {
       await open(url);
@@ -77,15 +75,9 @@ export default function MessageItem({
   const hasText = !!msg.text?.trim();
   const hasSources = !!(msg.sources && msg.sources.length > 0);
 
-  // 【修改点】：如果消息已被手动停止，则不应再显示“正在处理”动画
   const isCurrentlyThinking = isAi && !hasText && !hasSources && !msg.isStopped && isParentLoading;
-  
-  // 【修改点】：如果消息被手动停止，即使没有文本也不应被隐藏
   const isMessageTrulyEmpty = isAi && !hasText && !hasSources && !isParentLoading && !msg.isStopped;
-  
   const shouldShowMarkdown = isAi && hasText;
-
-  // 【修改点】：只要有文本或者被手动停止了，就显示底部元数据区域
   const shouldShowMetadata = isAi && !msg.isEditing && (hasText || msg.isStopped);
 
   if (isMessageTrulyEmpty) {
@@ -142,7 +134,6 @@ export default function MessageItem({
             <>
               {isAi ? (
                 <div className="flex flex-col gap-2 min-w-[150px]">
-                  {/* AI 处理阶段：仅对当前空 AI 消息展示 */}
                   {isCurrentlyThinking && (
                     <div className="flex items-center gap-2 text-xs text-amber-500/80 font-mono py-1 select-none">
                       <div className="flex space-x-1 items-center">
@@ -154,7 +145,6 @@ export default function MessageItem({
                     </div>
                   )}
 
-                  {/* 网页链接折叠区 */}
                   {msg.sources && msg.sources.length > 0 && (
                     <div className="mb-2 border border-[#3d4a3e] bg-[#232b24]/50 rounded-lg p-2 text-xs text-[#a9d1b1] w-full font-sans shadow-sm select-none">
                       <button
@@ -205,7 +195,6 @@ export default function MessageItem({
                     </div>
                   )}
 
-                  {/* 只要 AI 有文本，就立即渲染 */}
                   {shouldShowMarkdown && (
                     <MarkdownMessage text={msg.text} fontSize={chatFontSize} />
                   )}
@@ -213,17 +202,15 @@ export default function MessageItem({
               ) : (
                 <div className="flex flex-col gap-2">
                   <p className="whitespace-pre-wrap select-text break-all">{msg.text}</p>
-                  {msg.filePaths && msg.filePaths.length > 0 && (
+                  {/* 修改：使用 attachments 替代 filePaths，直接读取元数据渲染 */}
+                  {msg.attachments && msg.attachments.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-1 pt-1.5 border-t border-white/10">
-                      {msg.filePaths.map((fp, i) => {
-                        const fn = fp.split(/[/\\]/).pop() || fp;
-                        return (
-                          <div key={i} className="flex items-center gap-1 bg-white/10 text-white/95 px-1.5 py-0.5 rounded text-[9px] font-mono select-none">
-                            {renderAttachmentIcon(getFileType(fn))}
-                            <span>{fn}</span>
-                          </div>
-                        );
-                      })}
+                      {msg.attachments.map((file, i) => (
+                        <div key={i} className="flex items-center gap-1 bg-white/10 text-white/95 px-1.5 py-0.5 rounded text-[9px] font-mono select-none">
+                          {renderAttachmentIcon(file.type)}
+                          <span>{file.name}</span>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -250,7 +237,6 @@ export default function MessageItem({
           </div>
         )}
 
-        {/* 【修改点】：底部元数据区域，支持渲染“已手动停止”标识 */}
         {shouldShowMetadata && (
           <div className="mt-1 pt-1.5 border-t border-white/5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-gray-500 font-mono select-none animate-in fade-in duration-500">
             {msg.isStopped && (

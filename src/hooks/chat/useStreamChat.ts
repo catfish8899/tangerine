@@ -3,6 +3,7 @@
 import { useRef } from "react";
 import { Message, ChatSession, AttachmentFile } from "../../types/chat";
 import { ResolvedModelConfig } from "./useModelManager";
+import { getAbsolutePath } from "../../utils/fileStorageService"; // 新增：引入路径转换工具
 
 interface StreamChatDeps {
   sessions: ChatSession[];
@@ -211,7 +212,7 @@ export function useStreamChat(deps: StreamChatDeps) {
 
     let branches = targetMsg.branches ? [...targetMsg.branches] : [];
     let activeBranchIndex = targetMsg.activeBranchIndex ?? 0;
-        if (branches.length === 0) { 
+    if (branches.length === 0) { 
       branches = [subsequentMessages]; 
       activeBranchIndex = 0; 
     } else { 
@@ -260,9 +261,19 @@ export function useStreamChat(deps: StreamChatDeps) {
       return { ...s, messages: [...updatedMessages, initialAiResponse] };
     }));
 
+    // 修改：从历史消息的 attachments 中提取并转换绝对路径
+    const filePathsToSend = await Promise.all(
+      (targetMsg.attachments || []).map(async (a) => {
+        if (a.localRelativePath) {
+          return await getAbsolutePath(a.localRelativePath);
+        }
+        return a.path; // fallback
+      })
+    );
+
     await executeStreamChat(
       precedingMessages,
-      targetMsg.filePaths || [],
+      filePathsToSend,
       getActiveSystemPrompt(session),
       streamAiMessageId,
       messageId,
@@ -270,23 +281,34 @@ export function useStreamChat(deps: StreamChatDeps) {
     );
   };
 
-  const handleSendMessage = async (customText?: any, filePathsOverride?: string[]) => {
+  const handleSendMessage = async (customText?: any, attachmentsOverride?: AttachmentFile[]) => {
     if (isLoading) return;
 
     const userText = typeof customText === "string" ? customText : inputText;
-    const finalFilePaths = filePathsOverride !== undefined ? filePathsOverride : attachments.map(a => a.path);
+    // 修改：使用 attachments 替代 filePaths
+    const finalAttachments = attachmentsOverride !== undefined ? attachmentsOverride : attachments;
 
-    if (!userText.trim() && finalFilePaths.length === 0) return;
+    if (!userText.trim() && finalAttachments.length === 0) return;
 
     const currentSessionSnapshot = sessions.find(s => s.id === activeSessionId);
     if (!currentSessionSnapshot) return;
+
+    // 修改：异步将相对路径转换为绝对路径，供 Python Sidecar 读取
+    const filePathsToSend = await Promise.all(
+      finalAttachments.map(async (a) => {
+        if (a.localRelativePath) {
+          return await getAbsolutePath(a.localRelativePath);
+        }
+        return a.path;
+      })
+    );
 
     const userMessage: Message = {
       id: Date.now().toString(),
       sender: "user",
       text: userText,
       timestamp: Date.now(),
-      filePaths: finalFilePaths
+      attachments: finalAttachments // 修改：直接存储附件元数据数组
     };
 
     const currentMessages = [...currentSessionSnapshot.messages, userMessage];
@@ -335,7 +357,7 @@ export function useStreamChat(deps: StreamChatDeps) {
 
     await executeStreamChat(
       currentMessages,
-      finalFilePaths,
+      filePathsToSend, // 传递转换后的绝对路径数组
       getActiveSystemPrompt(currentSessionSnapshot),
       streamAiMessageId,
       undefined,

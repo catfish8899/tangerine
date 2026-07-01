@@ -1,27 +1,16 @@
 // src/hooks/chat/useAttachmentManager.ts
-// 负责管理附件状态、Tauri 原生文件选择、拖放监听及图片预览生成
 import { useState, useEffect } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AttachmentFile, getFileType } from "../../types/chat";
+import { copyAttachmentToLocal, getLocalPreviewUrl } from "../../utils/fileStorageService";
 
 export function useAttachmentManager(
+  activeSessionId: string,
   setWarningMessage: (msg: string | null) => void,
   setIsDraggingFiles: (dragging: boolean) => void
 ) {
   const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
-
-  const createImagePreview = async (path: string, name: string): Promise<{ previewUrl?: string; previewError?: string }> => {
-    try {
-      const previewUrl = await invoke<string>("read_image_as_data_url", { path });
-      return { previewUrl };
-    } catch (error: any) {
-      const message = error?.message || String(error) || "未知错误";
-      console.error("调用 Rust 图片读取命令失败：", { path, name, error });
-      return { previewError: `图片读取失败：${message}` };
-    }
-  };
 
   const buildAttachmentFromPath = async (path: string): Promise<AttachmentFile> => {
     const parts = path.split(/[\\/]/);
@@ -29,11 +18,20 @@ export function useAttachmentManager(
     const type = getFileType(name);
     const attachment: AttachmentFile = { name, path, type };
 
-    if (type === "image") {
-      const previewResult = await createImagePreview(path, name);
-      attachment.previewUrl = previewResult.previewUrl;
-      attachment.previewError = previewResult.previewError;
+    try {
+      const localRelativePath = await copyAttachmentToLocal(path, activeSessionId);
+      attachment.localRelativePath = localRelativePath;
+      
+      if (type === "image") {
+        const previewUrl = await getLocalPreviewUrl(localRelativePath);
+        attachment.previewUrl = previewUrl;
+      }
+    } catch (error: any) {
+      const message = error?.message || String(error) || "未知错误";
+      console.error("附件物理复制或预览生成失败：", { path, name, error });
+      attachment.previewError = `文件处理失败：${message}`;
     }
+    
     return attachment;
   };
 
@@ -44,21 +42,20 @@ export function useAttachmentManager(
     const uniqueIncomingPaths = Array.from(new Set(normalizedPaths));
     const newAttachments = await Promise.all(uniqueIncomingPaths.map(buildAttachmentFromPath));
 
-    const failedImages = newAttachments.filter(file => file.type === "image" && !file.previewUrl);
-    if (failedImages.length > 0) {
-      console.warn("以下图片未能生成预览：", failedImages);
-      setWarningMessage("⚠️ 某些图片未能生成预览，请检查 Rust 终端输出。");
+    const failedFiles = newAttachments.filter(file => file.previewError);
+    if (failedFiles.length > 0) {
+      console.warn("以下文件未能成功处理：", failedFiles);
+      setWarningMessage("⚠️ 某些文件未能成功处理，请检查控制台输出。");
       setTimeout(() => setWarningMessage(null), 4000);
     }
 
     setAttachments(prev => {
       const existingPaths = new Set(prev.map(a => a.path));
-      const filteredNew = newAttachments.filter(a => !existingPaths.has(a.path));
+      const filteredNew = newAttachments.filter(a => !existingPaths.has(a.path) && !a.previewError); 
       return [...prev, ...filteredNew];
     });
   };
 
-  // Tauri 原生拖放监听
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     const registerDragDropListener = async () => {
@@ -81,7 +78,7 @@ export function useAttachmentManager(
     };
     registerDragDropListener();
     return () => { if (unlisten) unlisten(); };
-  }, []);
+  }, [activeSessionId]);
 
   const handleSelectFiles = async () => {
     try {
@@ -128,12 +125,11 @@ export function useAttachmentManager(
       }
       return;
     }
-    // previewImage 状态在 UI 中管理，这里通过回调设置（为保持原接口，在主 hook 中处理）
   };
 
   return {
     attachments, setAttachments,
     handleSelectFiles, handleDropFiles, handleRemoveAttachment,
-    mergeAttachments
+    mergeAttachments, handlePreviewImage
   };
 }

@@ -7,15 +7,11 @@ export interface Message {
   model?: string;
   tokensUsed?: number;
   timestamp?: number;
-  filePaths?: string[]; // 记录本次消息关联的文件绝对路径列表
-  isStopped?: boolean; // 新增：标记该消息是否被手动停止生成
-
-  // 编辑和分支管理字段
+  attachments?: AttachmentFile[]; 
+  isStopped?: boolean;
   isEditing?: boolean;
   activeBranchIndex?: number;
-  branches?: Message[][]; // 存储该用户消息发起的分支（每个分支包含该节点之后的所有后续消息数组）
-
-  // 保存联网检索的来源网页列表
+  branches?: Message[][];
   sources?: Array<{ title: string; url: string }>;
 }
 
@@ -23,27 +19,29 @@ export interface ChatSession {
   id: string;
   title: string;
   messages: Message[];
-  roleId?: string; // 绑定到当前会话的角色 ID
-  type?: "chat" | "automation"; // 标记该会话是普通对话还是自动化流程页面
+  roleId?: string;
+  type?: "chat" | "automation";
 }
 
 export interface Role {
   id: string;
   name: string;
   systemPrompt: string;
-  provider?: string; // 角色绑定的模型提供商（展示名，可与设置页提供商名称保持一致）
-  model?: string; // 角色绑定的模型名称
+  provider?: string;
+  model?: string;
 }
 
 export interface AttachmentFile {
   name: string;
-  path: string;
+  path: string; 
   type: "image" | "audio" | "code" | "office" | "other";
-  previewUrl?: string; // 图片文件的本地预览地址（这里将使用 data URL）
-  previewError?: string; // 图片预览失败原因
+  
+  localRelativePath?: string; // 用于 JSON 持久化和发给后端
+  previewUrl?: string;        // 改回 previewUrl，用于前端 <img> 渲染 (Base64 Data URL)
+  
+  previewError?: string; 
 }
 
-// 辅助函数：根据文件名推断附件卡片展示类型
 export function getFileType(fileName: string): "image" | "audio" | "code" | "office" | "other" {
   const ext = fileName.split(".").pop()?.toLowerCase() || "";
   if (["jpg", "jpeg", "png", "gif", "webp", "bmp"].includes(ext)) return "image";
@@ -53,7 +51,6 @@ export function getFileType(fileName: string): "image" | "audio" | "code" | "off
   return "other";
 }
 
-// 辅助函数：根据文件名获取图片 MIME 类型
 export function getImageMimeType(fileName: string): string {
   const ext = fileName.split(".").pop()?.toLowerCase() || "";
   if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
@@ -64,7 +61,6 @@ export function getImageMimeType(fileName: string): string {
   return "application/octet-stream";
 }
 
-// 辅助函数：将时间戳格式化为 12 小时制
 export function format12HourTime(timestamp?: number): string {
   if (!timestamp) return "未知";
   const date = new Date(timestamp);
