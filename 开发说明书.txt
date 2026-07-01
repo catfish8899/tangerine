@@ -63,8 +63,18 @@ tangerine-agent/
 │   │   │   ├── SystemTimeBadge.tsx     # 系统时间徽标组件
 │   │   │   └── FlowEditor.tsx          # 主画布编辑器（视图层）：状态组装、ReactFlow 渲染与 UI 组合
 │   │   │
-│   │   ├── chat/                       # 聊天界面相关组件 (消息气泡、输入框、分支切换器等)
-│   │   └── common/                     # 通用组件 (全局右键菜单、警告提示、图片预览等)
+│   │   ├── AttachmentPreviewList.tsx   # 附件预览列表：图片缩略图、文件图标、移除与预览交互
+│   │   ├── AutomationWorkspace.tsx     # 自动化工作区容器：提供 ReactFlowProvider 上下文与画布挂载
+│   │   ├── ChatInput.tsx               # 聊天输入框主组件：状态调度、文本输入、发送/停止控制
+│   │   ├── ChatWorkspace.tsx           # 聊天工作区主视图：消息流渲染、拖拽上传蒙层、图片预览弹窗
+│   │   ├── CodeBlock.tsx               # 代码块组件：代码高亮容器、动态字号适配、一键复制功能
+│   │   ├── MarkdownMessage.tsx         # Markdown 渲染器：基于 react-markdown 的自定义标签样式重写
+│   │   ├── MessageItem.tsx             # 消息气泡组件：多分支切换、搜索溯源抽屉、编辑与元数据展示
+│   │   ├── ModelSelector.tsx           # 模型选择器：模型分类标识计算、名称格式化、下拉菜单
+│   │   ├── RoleSelector.tsx            # 角色选择器：角色列表渲染、锁定状态判断、下拉菜单
+│   │   ├── RolesModal.tsx              # 角色管理弹窗：角色 CRUD、系统提示词编辑与专属模型绑定
+│   │   ├── SettingsModal.tsx           # 设置面板主入口：组装侧边栏与 API/本地/格式 设置 Tab
+│   │   └── Sidebar.tsx                 # 左侧全局侧边栏：会话列表、新建对话/自动化、底部功能导航
 │   │
 │   ├── hooks/                          # 自定义 Hooks
 │   │   ├── chat/                       # 聊天核心逻辑解耦子模块
@@ -130,6 +140,15 @@ tangerine-agent/
 
 **优势**：节点组件拆分后，单个节点的状态更新不会导致其他无关节点组件的闭包重建，显著提升了大型画布的渲染性能；工具函数的重构消除了硬编码，提升了代码的可扩展性与执行效率。
 
-### 4. 多模型与算力调度
+### 4. 聊天输入组件视图层解耦 (`ChatInput`)
+为避免单一 UI 组件承担过多的渲染与交互逻辑，将原本臃肿的 `ChatInput.tsx` 进行了视图层解耦，拆分为 4 个高内聚的独立组件（均位于 `components/` 根目录）：
+- **`AttachmentPreviewList`**：专职处理附件预览渲染。包含图片缩略图加载容错、多文件类型图标映射及移除/预览交互。
+- **`RoleSelector`**：专职处理角色选择逻辑。封装角色列表渲染、会话锁定状态判断（`canSelectRole`）及复杂的激活态样式计算。
+- **`ModelSelector`**：专职处理模型选择逻辑。包含模型分类（Ollama/云端）标识计算、名称格式化及下拉菜单。
+- **`ChatInput` (主组件)**：作为状态调度中心，仅负责维护核心输入状态（文本、加载态），并将状态与回调函数分发给子组件，同时处理发送/停止等核心交互。
+
+**优势**：主组件 JSX 结构更加清晰，代码量大幅减少；子组件作为纯受控组件，保证了数据流的单向性。同时，下拉菜单的互斥逻辑（如打开角色菜单时关闭模型菜单）通过父组件的 setter 函数进行协调，避免了子组件间的直接耦合，提升了组件的独立性与可维护性。
+
+### 5. 多模型与算力调度
 - **AMD 生态兼容**：框架不依赖任何 NVIDIA 专属生态（如 CUDA 强绑定），Ollama 侧车支持 AMD ROCm 或纯 CPU 推理，云端模型通过标准 OpenAI 兼容 API 调用。
 - **算力保护**：Python Sidecar (`main.py`) 通过 FastAPI 的 `Request.is_disconnected()` 实时检测前端 SSE 连接状态。若用户点击“停止生成”或关闭应用，Sidecar 会立即切断推理算力，避免资源浪费。
