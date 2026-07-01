@@ -63,6 +63,11 @@ tangerine-agent/
 │   │   │   ├── SystemTimeBadge.tsx     # 系统时间徽标组件
 │   │   │   └── FlowEditor.tsx          # 主画布编辑器（视图层）：状态组装、ReactFlow 渲染与 UI 组合
 │   │   │
+│   │   ├── roles/                      # 角色管理弹窗解耦子模块
+│   │   │   ├── useRolesManager.ts      # 角色管理核心逻辑 Hook：数据加载、LocalStorage 读写、增删改查与模型推断
+│   │   │   ├── RolesList.tsx           # 左侧角色列表视图：纯受控组件，渲染列表并派发交互事件
+│   │   │   └── RoleEditor.tsx          # 右侧编辑面板视图：表单渲染、模型下拉联动与绑定效果预览
+│   │   │
 │   │   ├── AttachmentPreviewList.tsx   # 附件预览列表：图片缩略图、文件图标、移除与预览交互
 │   │   ├── AutomationWorkspace.tsx     # 自动化工作区容器：提供 ReactFlowProvider 上下文与画布挂载
 │   │   ├── ChatInput.tsx               # 聊天输入框主组件：状态调度、文本输入、发送/停止控制
@@ -72,7 +77,7 @@ tangerine-agent/
 │   │   ├── MessageItem.tsx             # 消息气泡组件：多分支切换、搜索溯源抽屉、编辑与元数据展示
 │   │   ├── ModelSelector.tsx           # 模型选择器：模型分类标识计算、名称格式化、下拉菜单
 │   │   ├── RoleSelector.tsx            # 角色选择器：角色列表渲染、锁定状态判断、下拉菜单
-│   │   ├── RolesModal.tsx              # 角色管理弹窗：角色 CRUD、系统提示词编辑与专属模型绑定
+│   │   ├── RolesModal.tsx              # 角色管理弹窗主入口：布局外壳与状态组装，分发状态与动作至子组件
 │   │   ├── SettingsModal.tsx           # 设置面板主入口：组装侧边栏与 API/本地/格式 设置 Tab
 │   │   └── Sidebar.tsx                 # 左侧全局侧边栏：会话列表、新建对话/自动化、底部功能导航
 │   │
@@ -149,6 +154,16 @@ tangerine-agent/
 
 **优势**：主组件 JSX 结构更加清晰，代码量大幅减少；子组件作为纯受控组件，保证了数据流的单向性。同时，下拉菜单的互斥逻辑（如打开角色菜单时关闭模型菜单）通过父组件的 setter 函数进行协调，避免了子组件间的直接耦合，提升了组件的独立性与可维护性。
 
-### 5. 多模型与算力调度
+### 5. 角色管理弹窗视图层与逻辑解耦 (`RolesModal`)
+为避免单一弹窗组件承担过多的状态管理与渲染逻辑，将 `RolesModal.tsx` 进行了深度解耦，拆分为 1 个核心逻辑 Hook 与 2 个纯视图组件（均位于 `components/roles/` 子目录）：
+- **`useRolesManager`**：核心状态与业务逻辑 Hook。接管所有角色数据加载、LocalStorage 读写、增删改查、可用模型推断计算以及未保存修改检测。
+- **`RolesList`**：左侧角色列表视图组件。作为纯受控组件渲染角色列表，并向上派发选择、新增、删除等交互事件。
+- **`RoleEditor`**：右侧编辑面板视图组件。处理表单渲染、模型提供商/模型下拉联动以及绑定效果预览展示。
+- **`RolesModal` (主组件)**：退化为纯粹的“布局外壳”与“状态组装器”，仅负责弹窗整体布局、头部渲染以及将 Hook 提供的状态与动作分发给子组件。
+
+**优势**：实现了数据流与视图层的彻底分离。在右侧编辑面板进行高频输入（如编辑 System Prompt）时，不会导致左侧角色列表的无意义重渲染，显著提升了交互流畅度；同时单文件代码量大幅减少，降低了维护成本。
+
+### 6. 多模型与算力调度
 - **AMD 生态兼容**：框架不依赖任何 NVIDIA 专属生态（如 CUDA 强绑定），Ollama 侧车支持 AMD ROCm 或纯 CPU 推理，云端模型通过标准 OpenAI 兼容 API 调用。
 - **算力保护**：Python Sidecar (`main.py`) 通过 FastAPI 的 `Request.is_disconnected()` 实时检测前端 SSE 连接状态。若用户点击“停止生成”或关闭应用，Sidecar 会立即切断推理算力，避免资源浪费。
+```
