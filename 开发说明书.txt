@@ -42,11 +42,22 @@ tangerine-agent/
 │   │   │   │   ├── useFlowTemplateDrag.ts  # 模板拖拽创建：全局指针事件监听、屏幕到画布坐标转换与节点创建
 │   │   │   │   ├── useFlowClipboard.ts     # 剪贴板与元素操作：复制、粘贴（含集合子孙节点复杂计算）、删除
 │   │   │   │   └── useFlowShortcuts.ts     # 全局快捷键：监听 Delete/Ctrl+C/V/Z 并分发操作
+│   │   │   ├── nodes/                  # 自定义节点组件解耦子模块
+│   │   │   │   ├── nodeFormatters.ts       # 节点辅助纯函数：日期/时间格式化、角色提示词提取等
+│   │   │   │   ├── NodeSelect.tsx          # 节点内部通用下拉选单基础组件
+│   │   │   │   ├── WorkflowNodeShell.tsx   # 节点外壳基础组件：统一样式、Handle 与图标布局
+│   │   │   │   ├── RoleNode.tsx            # 角色节点组件
+│   │   │   │   ├── ToolNode.tsx            # 工具节点组件
+│   │   │   │   ├── TriggerNode.tsx         # 触发器（入口）节点组件
+│   │   │   │   ├── CollectionNode.tsx      # 集合（容器）节点组件
+│   │   │   │   ├── ConversationNode.tsx    # 对话节点组件
+│   │   │   │   ├── HardwareNode.tsx        # 硬件节点组件
+│   │   │   │   └── TimerNode.tsx           # 定时节点组件
 │   │   │   ├── automationConstants.ts  # 画布常量 (如最大历史记录长度)
 │   │   │   ├── automationTypes.ts      # 画布类型定义 (节点、边、快照、剪贴板等)
 │   │   │   ├── automationStorage.ts    # 画布存储封装 (LocalStorage 读写安全处理)
-│   │   │   ├── automationNodeUtils.ts  # 纯函数工具：ID生成、快照比对、集合关系、子孙查找等
-│   │   │   ├── AutomationNodes.tsx     # 自定义节点组件与 nodeTypes 注册
+│   │   │   ├── automationNodeUtils.ts  # 纯函数工具：ID生成、几何计算、集合吸附、BFS子孙查找、节点工厂
+│   │   │   ├── AutomationNodes.tsx     # 自定义节点类型注册表 (nodeTypes 导出入口)
 │   │   │   ├── AutomationToolbar.tsx   # 底部工具栏；Pointer 拖拽起点
 │   │   │   ├── DragGhost.tsx           # 拖拽幽灵预览组件
 │   │   │   ├── SystemTimeBadge.tsx     # 系统时间徽标组件
@@ -112,6 +123,13 @@ tangerine-agent/
 
 **优势**：重构后的 `FlowEditor.tsx` 代码量大幅减少，从“业务逻辑处理中心”转变为纯粹的“状态组装器”和“视图渲染层”。这不仅降低了认知负担，还通过物理隔离减少了无关状态更新导致的闭包重建，提升了大型画布的渲染性能。
 
-### 3. 多模型与算力调度
+### 3. 自动化节点组件与工具函数解耦 (`AutomationNodes` & `NodeUtils`)
+为避免单文件代码量过大导致的维护困难与渲染性能瓶颈，对节点视图层与工具函数层进行了深度解耦与重构：
+- **节点组件物理拆分**：将原本臃肿的 `AutomationNodes.tsx` 拆分为 `nodes/` 子目录。提取了 `WorkflowNodeShell` (外壳) 和 `NodeSelect` (下拉框) 作为基础 UI 组件，并将 7 种具体节点 (Role, Tool, Trigger 等) 拆分为独立文件。主文件仅作为 `nodeTypes` 的注册导出入口。
+- **工具函数配置驱动与算法优化**：重构 `automationNodeUtils.ts`，将长达百行的 `if-else` 节点工厂函数重构为基于 `NODE_BLUEPRINTS` 配置字典的策略模式；将 $O(N^2)$ 的子孙节点查找算法优化为基于邻接表的 BFS ($O(N)$) 广度优先搜索；并对文件内部进行逻辑分区（基础工具、快照比对、几何计算、树遍历、节点工厂）。
+
+**优势**：节点组件拆分后，单个节点的状态更新不会导致其他无关节点组件的闭包重建，显著提升了大型画布的渲染性能；工具函数的重构消除了硬编码，提升了代码的可扩展性与执行效率。
+
+### 4. 多模型与算力调度
 - **AMD 生态兼容**：框架不依赖任何 NVIDIA 专属生态（如 CUDA 强绑定），Ollama 侧车支持 AMD ROCm 或纯 CPU 推理，云端模型通过标准 OpenAI 兼容 API 调用。
 - **算力保护**：Python Sidecar (`main.py`) 通过 FastAPI 的 `Request.is_disconnected()` 实时检测前端 SSE 连接状态。若用户点击“停止生成”或关闭应用，Sidecar 会立即切断推理算力，避免资源浪费。
