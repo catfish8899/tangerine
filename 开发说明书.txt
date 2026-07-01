@@ -1,21 +1,28 @@
-tangerine 桌面 agent框架 - 开发说明书
-一、技术栈与核心依赖
-桌面壳层：Tauri 2（Rust）
-前端：React 18 + TypeScript + Vite 6 + Tailwind CSS v4
-工作流画布：@xyflow/react
-Markdown 渲染：
-react-markdown
-remark-gfm
-rehype-highlight
-highlight.js
-Tauri 插件：
-@tauri-apps/plugin-shell
-@tauri-apps/plugin-dialog
-@tauri-apps/plugin-fs
-Python Sidecar：FastAPI
-Rust 图片处理：base64
-二、项目目录结构
-Text
+# tangerine 桌面 agent框架 - 开发说明书
+
+## 一、技术栈与核心依赖
+
+- **桌面壳层**：Tauri 2（Rust）
+- **前端**：React 18 + TypeScript + Vite 6 + Tailwind CSS v4
+- **工作流画布**：@xyflow/react
+- **Markdown 渲染**：
+  - react-markdown
+  - remark-gfm
+  - rehype-highlight
+  - highlight.js
+- **Tauri 插件**：
+  - @tauri-apps/plugin-shell
+  - @tauri-apps/plugin-dialog
+  - @tauri-apps/plugin-fs
+- **Python Sidecar**：FastAPI
+- **Rust 图片处理**：base64
+
+## 二、项目目录结构
+
+```text
+tangerine-agent/
+├── src/                                # 前端源码目录
+│   ├── components/                     # UI 组件
 │   │   ├── settings/                   # 设置面板解耦子模块
 │   │   │   ├── types.ts                # 设置面板相关的类型定义 (ApiProviderConfig 等)
 │   │   │   ├── constants.ts            # 设置面板相关的常量、Storage Key 与默认配置
@@ -26,29 +33,65 @@ Text
 │   │   │   ├── CloudModelsTab.tsx      # 云端模型设置 Tab 内容
 │   │   │   ├── OllamaModelsTab.tsx     # Ollama 模型设置 Tab 内容
 │   │   │   └── FormatSettingsTab.tsx   # 对话格式设置 Tab 内容
-│   │   └── automation/
-│   │       ├── automationConstants.ts  # 画布常量
-│   │       ├── automationTypes.ts      # 画布类型定义
-│   │       ├── automationStorage.ts    # 画布存储封装
-│   │       ├── automationNodeUtils.ts  # 纯函数工具：ID、快照、集合关系、子孙查找等
-│   │       ├── AutomationNodes.tsx     # 自定义节点组件与 nodeTypes
-│   │       ├── AutomationToolbar.tsx   # 底部工具栏；Pointer 拖拽起点
-│   │       ├── DragGhost.tsx           # 拖拽幽灵预览
-│   │       ├── SystemTimeBadge.tsx     # 系统时间徽标
-│   │       └── FlowEditor.tsx          # 主画布编辑器；节点、边、快捷键、复制粘贴、撤销重做
-│   ├── hooks/
-│   │   └── useChatManager.ts           # 聊天核心状态管理；会话、流式响应(AbortController中断)、分支切换与保存、深度删除防复活、附件与拖放
-│   ├── types/
+│   │   ├── automation/                 # 自动化画布子模块
+│   │   │   ├── automationConstants.ts  # 画布常量
+│   │   │   ├── automationTypes.ts      # 画布类型定义
+│   │   │   ├── automationStorage.ts    # 画布存储封装
+│   │   │   ├── automationNodeUtils.ts  # 纯函数工具：ID、快照、集合关系、子孙查找等
+│   │   │   ├── AutomationNodes.tsx     # 自定义节点组件与 nodeTypes
+│   │   │   ├── AutomationToolbar.tsx   # 底部工具栏；Pointer 拖拽起点
+│   │   │   ├── DragGhost.tsx           # 拖拽幽灵预览
+│   │   │   ├── SystemTimeBadge.tsx     # 系统时间徽标
+│   │   │   └── FlowEditor.tsx          # 主画布编辑器；节点、边、快捷键、复制粘贴、撤销重做
+│   │   ├── chat/                       # 聊天界面相关组件 (消息气泡、输入框、分支切换器等)
+│   │   └── common/                     # 通用组件 (全局右键菜单、警告提示、图片预览等)
+│   │
+│   ├── hooks/                          # 自定义 Hooks
+│   │   ├── chat/                       # 聊天核心逻辑解耦子模块
+│   │   │   ├── useChatUIState.ts       # UI 状态：输入框、下拉菜单、弹窗、右键菜单、字体等
+│   │   │   ├── useModelManager.ts      # 模型管理：API 配置解析、模型列表同步、角色模型推断
+│   │   │   ├── useAttachmentManager.ts # 附件管理：文件选择、Tauri 拖放监听、图片预览
+│   │   │   ├── useSessionManager.ts    # 会话管理：会话列表、消息增删改查、分支切换、角色管理
+│   │   │   └── useStreamChat.ts        # 流式请求：SSE 解析、中断控制、消息发送与重发
+│   │   └── useChatManager.ts           # 聊天核心状态管理主入口：组合子 Hooks，处理跨模块副作用，对外提供统一接口
+│   │
+│   ├── types/                          # TypeScript 类型定义
 │   │   └── chat.ts                     # 聊天域类型定义；含 Message(含isStopped/branches) / ChatSession / Role / AttachmentFile
-│   └── App.tsx                         # 应用主入口；聊天页/自动化页主视图分流、全局右键菜单(调用深度删除/重发/编辑)
-└── src-tauri/
-    ├── capabilities/
-    │   └── default.json                # Tauri capability 配置
-    ├── src/
-    │   └── lib.rs                      # Rust 主入口；插件注册、Sidecar 拉起、read_image_as_data_url 命令
-    ├── Cargo.toml                      # Rust 依赖清单
-    ├── tauri.conf.json                 # Tauri 配置
-    └── py_sidecar/
-        ├── main.py                     # FastAPI 服务；/chat SSE流式输出、客户端断开检测(Request.is_disconnected)以切断算力、多模型适配
-        ├── debugger.py                 # 调试面板
-        └── requirements.txt            # Python 依赖
+│   │
+│   ├── App.tsx                         # 应用主入口；聊天页/自动化页主视图分流、全局右键菜单(调用深度删除/重发/编辑)
+│   ├── main.tsx                        # React 渲染入口
+│   └── index.css                       # 全局样式 (Tailwind CSS v4 入口)
+│
+├── src-tauri/                          # Tauri (Rust) 后端目录
+│   ├── capabilities/
+│   │   └── default.json                # Tauri capability 权限配置
+│   ├── src/
+│   │   └── lib.rs                      # Rust 主入口；插件注册、Sidecar 拉起、read_image_as_data_url 命令
+│   ├── Cargo.toml                      # Rust 依赖清单
+│   ├── tauri.conf.json                 # Tauri 窗口与打包配置
+│   └── py_sidecar/                     # Python 侧车 (Sidecar) 目录
+│       ├── main.py                     # FastAPI 服务；/chat SSE流式输出、客户端断开检测(Request.is_disconnected)以切断算力、多模型适配
+│       ├── debugger.py                 # 调试面板
+│       └── requirements.txt            # Python 依赖清单
+│
+├── package.json                        # 前端依赖清单
+├── vite.config.ts                      # Vite 构建配置
+├── tailwind.config.js                  # Tailwind CSS 配置 (若使用 v4 可能在 css 中配置)
+└── tsconfig.json                       # TypeScript 编译配置
+```
+
+## 三、架构设计与解耦说明
+
+### 1. 聊天核心状态解耦 (`useChatManager`)
+为避免单一 Hook 文件过于臃肿导致维护困难和性能瓶颈，`useChatManager` 采用了**组合式自定义 Hook** 的设计模式，按职责拆分为 5 个子模块：
+- **`useChatUIState`**：纯粹管理 UI 交互状态（如输入框文本、菜单显隐、拖拽状态），隔离 DOM 事件监听。
+- **`useModelManager`**：专注处理 API 提供商配置解析、模型列表同步以及基于角色的模型推断。
+- **`useAttachmentManager`**：封装 Tauri 原生文件选择器、拖放事件监听以及 Rust 侧图片 Base64 预览生成。
+- **`useSessionManager`**：管理 LocalStorage 持久化、会话树操作（包含复杂的分支切换与深度删除防复活逻辑）。
+- **`useStreamChat`**：处理与 Python Sidecar 的 SSE 流式通信、数据解析、中断控制（AbortController）及错误降级。
+
+**优势**：主入口 `useChatManager.ts` 仅负责依赖注入和跨模块副作用联动，对外暴露的 `state`、`refs` 和 `actions` 接口保持 100% 兼容，调用方（如 `App.tsx`）无需感知内部重构。
+
+### 2. 多模型与算力调度
+- **AMD 生态兼容**：框架不依赖任何 NVIDIA 专属生态（如 CUDA 强绑定），Ollama 侧车支持 AMD ROCm 或纯 CPU 推理，云端模型通过标准 OpenAI 兼容 API 调用。
+- **算力保护**：Python Sidecar (`main.py`) 通过 FastAPI 的 `Request.is_disconnected()` 实时检测前端 SSE 连接状态。若用户点击“停止生成”或关闭应用，Sidecar 会立即切断推理算力，避免资源浪费。
